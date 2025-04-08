@@ -10,6 +10,6 @@ public class HelloController {
     @CrossOrigin(origins = "*") // Allow requests from any origin (adjust for production)
     @GetMapping("/api/hello")
     public String sayHello() {
-        return "Hello from Spring Boot!";
+        return "Hello Yan from Spring Boot!";
     }
 }
