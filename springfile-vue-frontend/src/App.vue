@@ -1,118 +1,380 @@
 <template>
-  <div class="min-h-screen bg-gray-50">
-    <header class="bg-white shadow">
-      <div class="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
-        <h1 class="text-3xl font-bold text-gray-900">File Upload Manager</h1>
-      </div>
-    </header>
+  <div class="file-upload-container">
+    <h2>File Upload</h2>
     
-    <main class="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
-      <div class="bg-white shadow rounded-lg p-6">
-        <FileUploader @file-selected="onFileSelected" />
-        
-        <div class="mt-8 grid gap-6 md:grid-cols-2">
-          <CategorySelector 
-            v-model:category="selectedCategory"
-            v-model:subcategory="selectedSubcategory"
-            :categories="categories"
-          />
-          
-          <LabelManager 
-            v-model:labels="selectedLabels"
-            :suggested-labels="suggestedLabels" 
-          />
+    <form @submit.prevent="handleSubmit">
+      <!-- File Upload Area -->
+      <div class="upload-area" @dragover.prevent @drop.prevent="handleFileDrop">
+        <input 
+          type="file" 
+          ref="fileInput" 
+          @change="handleFileChange" 
+          :disabled="isUploading"
+          style="display: none"
+        />
+        <div class="upload-placeholder" @click="openFileSelector">
+          <div class="upload-icon">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="17 8 12 3 7 8"></polyline>
+              <line x1="12" y1="3" x2="12" y2="15"></line>
+            </svg>
+          </div>
+          <p v-if="!selectedFile">Click or drag file to upload</p>
+          <p v-else>{{ selectedFile.name }} ({{ formatFileSize(selectedFile.size) }})</p>
         </div>
         
-        <div class="mt-8">
-          <FilePreview 
-            v-if="selectedFile" 
-            :file="selectedFile" 
-            :category="selectedCategory"
-            :subcategory="selectedSubcategory"
-            :labels="selectedLabels"
-          />
-        </div>
-        
-        <div class="mt-8 flex justify-end">
-          <button 
-            @click="submitForm"
-            class="px-4 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
-            :disabled="!isFormValid"
-          >
-            Submit
-          </button>
+        <!-- File Preview -->
+        <div v-if="previewUrl" class="file-preview">
+          <img :src="previewUrl" alt="Preview" />
         </div>
       </div>
-    </main>
+      
+      <!-- Category Selection -->
+      <div class="form-group">
+        <label for="category">Category</label>
+        <select 
+          id="category" 
+          v-model="selectedCategoryId" 
+          @change="handleCategoryChange" 
+          :disabled="isUploading"
+          required
+        >
+          <option value="">-- Select a category --</option>
+          <option 
+            v-for="category in categoriesData" 
+            :key="category.id" 
+            :value="category.id"
+          >
+            {{ category.name }}
+          </option>
+        </select>
+      </div>
+      
+      <!-- Subcategory Selection -->
+      <div class="form-group">
+        <label for="subcategory">Subcategory</label>
+        <select 
+          id="subcategory" 
+          v-model="selectedSubcategoryId" 
+          :disabled="!selectedCategoryId || isUploading"
+          required
+        >
+          <option value="">-- Select a subcategory --</option>
+          <option 
+            v-for="subcategory in availableSubcategories" 
+            :key="subcategory.id" 
+            :value="subcategory.id"
+          >
+            {{ subcategory.name }}
+          </option>
+        </select>
+      </div>
+      
+      <!-- Submit Button -->
+      <button 
+        type="submit" 
+        :disabled="!isFormValid || isUploading"
+        class="submit-button"
+      >
+        {{ isUploading ? 'Uploading...' : 'Upload File' }}
+      </button>
+      
+      <!-- Status Message -->
+      <div v-if="message" :class="['message', message.includes('Error') ? 'error' : 'success']">
+        {{ message }}
+      </div>
+    </form>
   </div>
 </template>
 
 <script setup>
-import { ref, computed } from 'vue';
-import FileUploader from './components/FileUploader.vue';
-import CategorySelector from './components/CategorySelector.vue';
-import LabelManager from './components/LabelManager.vue';
-import FilePreview from './components/FilePreview.vue';
+import { ref, computed, onMounted } from 'vue';
 
-// State for the selected file
+// File handling refs
+const fileInput = ref(null);
 const selectedFile = ref(null);
+const previewUrl = ref(null);
+const isUploading = ref(false);
+const message = ref('');
 
-// State for categories and subcategories
-const categories = ref([
-  { 
-    name: 'Documents', 
-    subcategories: ['Reports', 'Invoices', 'Contracts', 'Other'] 
+// Category selection refs
+const selectedCategoryId = ref('');
+const selectedSubcategoryId = ref('');
+
+// Sample nested categories data - replace with your actual data or API calls
+const categoriesData = ref([
+  {
+    id: 1,
+    name: 'Documents',
+    subcategories: [
+      { id: 101, name: 'Contracts' },
+      { id: 102, name: 'Reports' },
+      { id: 103, name: 'Invoices' }
+    ]
   },
-  { 
-    name: 'Images', 
-    subcategories: ['Photos', 'Graphics', 'Screenshots', 'Other'] 
+  {
+    id: 2,
+    name: 'Images',
+    subcategories: [
+      { id: 201, name: 'Photos' },
+      { id: 202, name: 'Diagrams' },
+      { id: 203, name: 'Illustrations' }
+    ]
   },
-  { 
-    name: 'Media', 
-    subcategories: ['Videos', 'Audio', 'Presentations', 'Other'] 
+  {
+    id: 3,
+    name: 'Spreadsheets',
+    subcategories: [
+      { id: 301, name: 'Financial Data' },
+      { id: 302, name: 'Statistics' },
+      { id: 303, name: 'Forecasts' }
+    ]
   },
-  { 
-    name: 'Custom', 
-    subcategories: ['Custom'] 
+  {
+    id: 4,
+    name: 'Presentations',
+    subcategories: [
+      { id: 401, name: 'Product Presentations' },
+      { id: 402, name: 'Sales Pitches' },
+      { id: 403, name: 'Training Materials' }
+    ]
   }
 ]);
 
-// Selected category and subcategory
-const selectedCategory = ref('');
-const selectedSubcategory = ref('');
-
-// Labels
-const suggestedLabels = ref(['Important', 'Draft', 'Final', 'Archive', 'Review']);
-const selectedLabels = ref([]);
-
-// Form validation
-const isFormValid = computed(() => {
-  return selectedFile.value && 
-         selectedCategory.value && 
-         selectedSubcategory.value;
+// Computed properties
+const selectedCategory = computed(() => {
+  return categoriesData.value.find(category => category.id === selectedCategoryId.value) || null;
 });
 
-// Event handlers
-const onFileSelected = (file) => {
-  selectedFile.value = file;
+const availableSubcategories = computed(() => {
+  if (!selectedCategory.value) return [];
+  return selectedCategory.value.subcategories || [];
+});
+
+const isFormValid = computed(() => {
+  return selectedFile.value && selectedCategoryId.value && selectedSubcategoryId.value;
+});
+
+// Methods
+const openFileSelector = () => {
+  fileInput.value.click();
 };
 
-const submitForm = () => {
-  // Here you would typically send the data to your server
-  // For demonstration purposes, we'll just log it
-  console.log({
-    file: selectedFile.value,
-    category: selectedCategory.value,
-    subcategory: selectedSubcategory.value,
-    labels: selectedLabels.value
-  });
-  
-  alert('File uploaded successfully!');
-  
-  // Reset the form
-  selectedFile.value = null;
-  selectedCategory.value = '';
-  selectedSubcategory.value = '';
-  selectedLabels.value = [];
+const handleFileChange = (event) => {
+  const file = event.target.files[0];
+  if (file) {
+    selectedFile.value = file;
+    createPreview(file);
+  }
 };
+
+const handleFileDrop = (event) => {
+  const file = event.dataTransfer.files[0];
+  if (file) {
+    selectedFile.value = file;
+    createPreview(file);
+  }
+};
+
+const createPreview = (file) => {
+  // Create preview for images
+  if (file.type.startsWith('image/')) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      previewUrl.value = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  } else {
+    previewUrl.value = null;
+  }
+};
+
+const handleCategoryChange = () => {
+  // Reset subcategory when category changes
+  selectedSubcategoryId.value = '';
+};
+
+const formatFileSize = (bytes) => {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(2) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+};
+
+const handleSubmit = async () => {
+  if (!isFormValid.value) return;
+  
+  isUploading.value = true;
+  message.value = 'Uploading...';
+  
+  try {
+    // Prepare form data - only sending IDs
+    const formData = new FormData();
+    formData.append('file', selectedFile.value);
+    formData.append('category_id', selectedCategoryId.value);
+    formData.append('subcategory_id', selectedSubcategoryId.value);
+    
+    // Simulate API call - replace with your actual API endpoint
+    await new Promise(resolve => setTimeout(resolve, 1500));
+    
+    // Actual API call (uncomment and update)
+    // const response = await fetch('your-api-endpoint', {
+    //   method: 'POST',
+    //   body: formData
+    // });
+    // if (!response.ok) throw new Error('Upload failed');
+    
+    message.value = 'File uploaded successfully!';
+    resetForm();
+  } catch (error) {
+    message.value = `Error: ${error.message}`;
+  } finally {
+    isUploading.value = false;
+  }
+};
+
+const resetForm = () => {
+  selectedFile.value = null;
+  previewUrl.value = null;
+  selectedCategoryId.value = '';
+  selectedSubcategoryId.value = '';
+  // Reset file input
+  if (fileInput.value) {
+    fileInput.value.value = '';
+  }
+};
+
+// Function to load categories data from an API
+const loadCategoriesData = async () => {
+  try {
+    // Uncomment and update with your actual API endpoint
+    // const response = await fetch('your-categories-api-endpoint');
+    // if (!response.ok) throw new Error('Failed to load categories');
+    // categoriesData.value = await response.json();
+    
+    // For now, using sample data already defined above
+  } catch (error) {
+    message.value = `Error loading categories: ${error.message}`;
+  }
+};
+
+// Load data when component mounts
+onMounted(() => {
+  loadCategoriesData();
+});
 </script>
+
+<style scoped>
+.file-upload-container {
+  max-width: 500px;
+  margin: 0 auto;
+  padding: 20px;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+}
+
+h2 {
+  text-align: center;
+  margin-bottom: 20px;
+  color: #333;
+}
+
+.upload-area {
+  margin-bottom: 20px;
+}
+
+.upload-placeholder {
+  border: 2px dashed #ddd;
+  border-radius: 6px;
+  padding: 30px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.upload-placeholder:hover {
+  border-color: #4299e1;
+}
+
+.upload-icon {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 10px;
+  color: #718096;
+}
+
+.file-preview {
+  margin-top: 15px;
+  text-align: center;
+}
+
+.file-preview img {
+  max-height: 200px;
+  max-width: 100%;
+  border-radius: 4px;
+}
+
+.form-group {
+  margin-bottom: 15px;
+}
+
+label {
+  display: block;
+  margin-bottom: 5px;
+  font-weight: 500;
+  color: #4a5568;
+}
+
+select {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background-color: white;
+  font-size: 16px;
+}
+
+select:disabled {
+  background-color: #f7fafc;
+  cursor: not-allowed;
+}
+
+.submit-button {
+  width: 100%;
+  padding: 10px;
+  background-color: #4299e1;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 16px;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+}
+
+.submit-button:hover:not(:disabled) {
+  background-color: #3182ce;
+}
+
+.submit-button:disabled {
+  background-color: #a0aec0;
+  cursor: not-allowed;
+}
+
+.message {
+  margin-top: 15px;
+  padding: 8px;
+  border-radius: 4px;
+  text-align: center;
+}
+
+.success {
+  background-color: #c6f6d5;
+  color: #2f855a;
+}
+
+.error {
+  background-color: #fed7d7;
+  color: #c53030;
+}
+</style>
