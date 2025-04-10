@@ -4,7 +4,7 @@ import jakarta.persistence.*;
 import java.time.LocalDateTime;
 
 @Entity
-public class StoredFile {
+public class File {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -34,11 +34,11 @@ public class StoredFile {
     private Subcategory subcategory;
 
     // Constructors
-    public StoredFile() {
+    public File() {
         this.uploadTimestamp = LocalDateTime.now();
     }
 
-    public StoredFile(String fileName, String fileType, long size, String storageIdentifier, Category category, Subcategory subcategory) {
+    public File(String fileName, String fileType, long size, String storageIdentifier, Category category, Subcategory subcategory) {
         this.fileName = fileName;
         this.fileType = fileType;
         this.size = size;
@@ -115,7 +115,7 @@ public class StoredFile {
 
     @Override
     public String toString() {
-        return "StoredFile{" +
+        return "File{" +
                "id=" + id +
                ", fileName='" + fileName + '\'' +
                ", fileType='" + fileType + '\'' +

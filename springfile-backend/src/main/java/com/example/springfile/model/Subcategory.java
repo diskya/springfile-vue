@@ -19,7 +19,7 @@ public class Subcategory {
     private Category category;
 
     @OneToMany(mappedBy = "subcategory", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
-    private List<StoredFile> storedFiles = new ArrayList<>();
+    private List<File> files = new ArrayList<>();
 
     // Constructors
     public Subcategory() {
@@ -55,23 +55,23 @@ public class Subcategory {
         this.category = category;
     }
 
-    public List<StoredFile> getStoredFiles() {
-        return storedFiles;
+    public List<File> getFiles() {
+        return files;
     }
 
-    public void setStoredFiles(List<StoredFile> storedFiles) {
-        this.storedFiles = storedFiles;
+    public void setFiles(List<File> files) {
+        this.files = files;
     }
 
     // Helper methods for bidirectional relationship
-    public void addStoredFile(StoredFile storedFile) {
-        storedFiles.add(storedFile);
-        storedFile.setSubcategory(this);
+    public void addFile(File file) {
+        files.add(file);
+        file.setSubcategory(this);
     }
 
-    public void removeStoredFile(StoredFile storedFile) {
-        storedFiles.remove(storedFile);
-        storedFile.setSubcategory(null);
+    public void removeFile(File file) {
+        files.remove(file);
+        file.setSubcategory(null);
     }
 
     @Override
