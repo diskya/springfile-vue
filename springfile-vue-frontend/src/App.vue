@@ -102,45 +102,8 @@ const message = ref('');
 const selectedCategoryId = ref('');
 const selectedSubcategoryId = ref('');
 
-// Sample nested categories data - replace with your actual data or API calls
-const categoriesData = ref([
-  {
-    id: 1,
-    name: 'Documents',
-    subcategories: [
-      { id: 101, name: 'Contracts' },
-      { id: 102, name: 'Reports' },
-      { id: 103, name: 'Invoices' }
-    ]
-  },
-  {
-    id: 2,
-    name: 'Images',
-    subcategories: [
-      { id: 201, name: 'Photos' },
-      { id: 202, name: 'Diagrams' },
-      { id: 203, name: 'Illustrations' }
-    ]
-  },
-  {
-    id: 3,
-    name: 'Spreadsheets',
-    subcategories: [
-      { id: 301, name: 'Financial Data' },
-      { id: 302, name: 'Statistics' },
-      { id: 303, name: 'Forecasts' }
-    ]
-  },
-  {
-    id: 4,
-    name: 'Presentations',
-    subcategories: [
-      { id: 401, name: 'Product Presentations' },
-      { id: 402, name: 'Sales Pitches' },
-      { id: 403, name: 'Training Materials' }
-    ]
-  }
-]);
+// Categories data fetched from API
+const categoriesData = ref([]);
 
 // Computed properties
 const selectedCategory = computed(() => {
@@ -164,6 +127,7 @@ const openFileSelector = () => {
 const handleFileChange = (event) => {
   const file = event.target.files[0];
   if (file) {
+    message.value = ''; // Clear previous message
     selectedFile.value = file;
     createPreview(file);
   }
@@ -172,6 +136,7 @@ const handleFileChange = (event) => {
 const handleFileDrop = (event) => {
   const file = event.dataTransfer.files[0];
   if (file) {
+    message.value = ''; // Clear previous message
     selectedFile.value = file;
     createPreview(file);
   }
@@ -213,18 +178,20 @@ const handleSubmit = async () => {
     formData.append('file', selectedFile.value);
     formData.append('category_id', selectedCategoryId.value);
     formData.append('subcategory_id', selectedSubcategoryId.value);
-    
-    // Simulate API call - replace with your actual API endpoint
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    
-    // Actual API call (uncomment and update)
-    // const response = await fetch('your-api-endpoint', {
-    //   method: 'POST',
-    //   body: formData
-    // });
-    // if (!response.ok) throw new Error('Upload failed');
-    
-    message.value = 'File uploaded successfully!';
+
+    // Actual API call
+    const response = await fetch('/api/files/upload', { // Updated endpoint
+      method: 'POST',
+      body: formData
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ message: 'Upload failed with status: ' + response.status }));
+      throw new Error(errorData.message || 'Upload failed');
+    }
+
+    const result = await response.json();
+    message.value = result.message || 'File uploaded successfully!';
     resetForm();
   } catch (error) {
     message.value = `Error: ${error.message}`;
@@ -247,14 +214,20 @@ const resetForm = () => {
 // Function to load categories data from an API
 const loadCategoriesData = async () => {
   try {
-    // Uncomment and update with your actual API endpoint
-    // const response = await fetch('your-categories-api-endpoint');
-    // if (!response.ok) throw new Error('Failed to load categories');
-    // categoriesData.value = await response.json();
+    // Fetch categories from the backend API
+    const response = await fetch('/api/categories'); // Assuming the backend runs on the same host/port or is proxied
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Failed to load categories: ${response.status} ${response.statusText} - ${errorText}`);
+    }
+    const data = await response.json();
+    categoriesData.value = data;
     
-    // For now, using sample data already defined above
   } catch (error) {
+    console.error('Error loading categories:', error);
     message.value = `Error loading categories: ${error.message}`;
+    // Optionally clear categories if loading fails
+    // categoriesData.value = []; 
   }
 };
 
