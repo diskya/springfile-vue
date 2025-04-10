@@ -1,5 +1,6 @@
 package com.example.springfile.controller;
 
+import com.example.springfile.dto.FileDto; // Import DTO
 import com.example.springfile.model.File;
 import com.example.springfile.service.FileService;
 import org.slf4j.Logger;
@@ -11,6 +12,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -58,6 +60,20 @@ public class FileController {
         } catch (Exception e) {
             logger.error("Unexpected error during file upload: {}", e.getMessage(), e);
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "An unexpected error occurred during file upload.", e);
+        }
+    }
+
+    @GetMapping
+    public ResponseEntity<List<FileDto>> getAllFiles() { // Changed return type
+        try {
+            List<FileDto> files = fileService.getAllFiles(); // Service now returns DTOs
+            if (files.isEmpty()) {
+                return ResponseEntity.noContent().build();
+            }
+            return ResponseEntity.ok(files);
+        } catch (Exception e) {
+            logger.error("Error retrieving files: {}", e.getMessage(), e);
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Could not retrieve files.", e);
         }
     }
 }

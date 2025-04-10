@@ -1,5 +1,6 @@
 package com.example.springfile.service;
 
+import com.example.springfile.dto.FileDto; // Import DTO
 import com.example.springfile.model.Category;
 import com.example.springfile.model.File;
 import com.example.springfile.model.Subcategory;
@@ -13,6 +14,8 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDateTime;
+import java.util.List;
+import java.util.stream.Collectors; // Import Collectors
 
 @Service
 public class FileService {
@@ -63,6 +66,27 @@ public class FileService {
         file.setUploadTimestamp(LocalDateTime.now()); // Set timestamp explicitly or rely on constructor
 
         return fileRepository.save(file);
+    }
+
+    @Transactional(readOnly = true)
+    public List<FileDto> getAllFiles() {
+        List<File> files = fileRepository.findAll();
+        return files.stream()
+                .map(this::mapToFileDto) // Use a helper method for mapping
+                .collect(Collectors.toList());
+    }
+
+    // Helper method to map File entity to FileDto
+    private FileDto mapToFileDto(File file) {
+        return new FileDto(
+                file.getId(),
+                file.getFileName(),
+                file.getFileType(),
+                file.getSize(),
+                file.getUploadTimestamp(),
+                file.getCategory() != null ? file.getCategory().getName() : null, // Safely get names
+                file.getSubcategory() != null ? file.getSubcategory().getName() : null
+        );
     }
 
     // Optional: Add methods for retrieving/deleting files later
