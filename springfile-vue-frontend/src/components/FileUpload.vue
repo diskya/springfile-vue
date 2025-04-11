@@ -3,13 +3,14 @@
     <h2>File Upload</h2>
 
     <form @submit.prevent="handleSubmit">
-      <!-- File Input (hidden) -->
+      <!-- File Input (hidden, allows multiple) -->
       <input
           type="file"
           ref="fileInput"
           @change="handleFileChange"
           :disabled="isUploading"
           style="display: none"
+          multiple
         />
 
       <!-- Integrated File Grid -->
@@ -22,13 +23,15 @@
               <line x1="12" y1="3" x2="12" y2="15"></line>
             </svg>
           </div>
-          <p v-if="!selectedFile">Click or drag file to upload</p>
-          <p v-else>{{ selectedFile.name }} ({{ formatFileSize(selectedFile.size) }})</p>
-        </div>
-
-        <!-- File Preview -->
-        <div v-if="previewUrl" class="file-preview">
-          <img :src="previewUrl" alt="Preview" />
+          <p v-if="selectedFiles.length === 0">Click or drag files to upload</p>
+          <div v-else class="selected-files-list">
+            <!-- <p>Selected files:</p> -->
+            <ul>
+              <li v-for="file in selectedFiles" :key="file.name">
+                {{ file.name }} ({{ formatFileSize(file.size) }})
+              </li>
+            </ul>
+          </div>
         </div>
       </div>
       <!-- End Integrated File Grid -->
@@ -61,9 +64,8 @@
           id="subcategory"
           v-model="selectedSubcategoryId"
           :disabled="!selectedCategoryId || isUploading"
-          required
-        >
-          <option value="">-- Select a subcategory --</option>
+          >
+          <option value="">-- Select a subcategory (Optional) --</option>
           <option
             v-for="subcategory in availableSubcategories"
             :key="subcategory.id"
@@ -80,7 +82,7 @@
         :disabled="!isFormValid || isUploading"
         class="submit-button"
       >
-        {{ isUploading ? 'Uploading...' : 'Upload File' }}
+        {{ isUploading ? 'Uploading...' : `Upload ${selectedFiles.length} File(s)` }}
       </button>
 
       <!-- Status Message -->
@@ -103,10 +105,12 @@ const categoriesError = ref('');
 
 // File handling refs
 const fileInput = ref(null);
-const selectedFile = ref(null);
-const previewUrl = ref(null);
+const selectedFiles = ref([]); // Changed to array for multiple files
+// const previewUrl = ref(null); // Removed single preview
 const isUploading = ref(false);
 const message = ref('');
+const uploadResults = ref([]); // To store results of individual file uploads
+const uploadErrors = ref([]); // To store errors from individual file uploads
 
 // Category selection refs
 const selectedCategoryId = ref('');
@@ -123,7 +127,8 @@ const availableSubcategories = computed(() => {
 });
 
 const isFormValid = computed(() => {
-  return selectedFile.value && selectedCategoryId.value && selectedSubcategoryId.value;
+  // Check if at least one file is selected and a category is chosen
+  return selectedFiles.value.length > 0 && selectedCategoryId.value;
 });
 
 // Methods
@@ -132,35 +137,28 @@ const openFileSelector = () => {
 };
 
 const handleFileChange = (event) => {
-  const file = event.target.files[0];
-  if (file) {
+  const files = event.target.files;
+  if (files && files.length > 0) {
     message.value = '';
-    selectedFile.value = file;
-    createPreview(file);
+    uploadResults.value = [];
+    uploadErrors.value = [];
+    selectedFiles.value = Array.from(files); // Convert FileList to array
+    // previewUrl.value = null; // Clear preview if any
   }
 };
 
 const handleFileDrop = (event) => {
-  const file = event.dataTransfer.files[0];
-  if (file) {
+  const files = event.dataTransfer.files;
+  if (files && files.length > 0) {
     message.value = '';
-    selectedFile.value = file;
-    createPreview(file);
+    uploadResults.value = [];
+    uploadErrors.value = [];
+    selectedFiles.value = Array.from(files); // Convert FileList to array
+    // previewUrl.value = null; // Clear preview if any
   }
 };
 
-const createPreview = (file) => {
-  // Create preview for images
-  if (file.type.startsWith('image/')) {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      previewUrl.value = e.target.result;
-    };
-    reader.readAsDataURL(file);
-  } else {
-    previewUrl.value = null;
-  }
-};
+// Removed createPreview function as we are not previewing multiple files
 
 const handleCategoryChange = () => {
   selectedSubcategoryId.value = '';
@@ -178,13 +176,21 @@ const handleSubmit = async () => {
 
   isUploading.value = true;
   message.value = 'Uploading...';
+  uploadResults.value = []; // Reset results
+  uploadErrors.value = []; // Reset errors
 
   try {
     // Prepare form data
     const formData = new FormData();
-    formData.append('file', selectedFile.value);
+    // Append each file with the key 'files'
+    selectedFiles.value.forEach(file => {
+      formData.append('files', file); // Use 'files' as key
+    });
     formData.append('category_id', selectedCategoryId.value);
-    formData.append('subcategory_id', selectedSubcategoryId.value);
+    // Only append subcategory_id if it's selected
+    if (selectedSubcategoryId.value) {
+      formData.append('subcategory_id', selectedSubcategoryId.value);
+    }
 
     // Actual API call
     const response = await fetch('/api/files/upload', {
@@ -192,33 +198,57 @@ const handleSubmit = async () => {
       body: formData
     });
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({ message: 'Upload failed with status: ' + response.status }));
-      throw new Error(errorData.message || 'Upload failed');
+    const result = await response.json(); // Always try to parse JSON
+
+    // Check for non-OK status, excluding 207 Multi-Status which indicates partial success
+    if (!response.ok && response.status !== 207) {
+      throw new Error(result.message || `Upload failed with status: ${response.status}`);
     }
 
-    const result = await response.json();
-    message.value = result.message || 'File uploaded successfully!';
-    resetForm();
-    emit('upload-success');
+    // Handle potential partial success (207 Multi-Status) or full success (201 Created)
+    message.value = result.message || 'Upload process completed.';
+    uploadResults.value = result.uploadedFiles || [];
+    uploadErrors.value = result.errors || [];
+
+    // Emit success only if there were *no* errors reported by the backend
+    if (uploadErrors.value.length === 0 && response.ok) { // Ensure response was fully OK (e.g., 201)
+        resetForm(); // Reset only on full success
+        emit('upload-success');
+    } else {
+        // Clear selected files even on partial failure or errors,
+        // so user has to re-select if they want to retry.
+        selectedFiles.value = [];
+        if (fileInput.value) fileInput.value.value = ''; // Clear input value
+    }
+
   } catch (error) {
+    console.error("Upload error details:", error);
     message.value = `Error: ${error.message}`;
+    // Add general network/parsing errors to the list
+    uploadErrors.value.push(`Client-side error: ${error.message}`);
+    // Clear selected files on general error too
+    selectedFiles.value = [];
+    if (fileInput.value) fileInput.value.value = '';
   } finally {
     isUploading.value = false;
+    // Keep message displayed to show results/errors
   }
 };
 
 const resetForm = () => {
-  selectedFile.value = null;
-  previewUrl.value = null;
+  selectedFiles.value = []; // Clear the array
+  // previewUrl.value = null; // Preview removed
   selectedCategoryId.value = '';
   selectedSubcategoryId.value = '';
+  uploadResults.value = []; // Clear results
+  uploadErrors.value = []; // Clear errors
   if (fileInput.value) {
-    fileInput.value.value = '';
+    fileInput.value.value = ''; // Important to allow re-selecting the same file(s)
   }
+  // Clear message after a longer delay only if resetForm is called (i.e., on full success)
   setTimeout(() => {
     message.value = '';
-  }, 3000);
+  }, 5000); // Increased delay
 };
 
 const loadCategoriesData = async () => {
@@ -304,6 +334,30 @@ h2 {
   max-height: 200px;
   max-width: 100%;
   border-radius: 4px;
+}
+
+.selected-files-list {
+  margin-top: 10px;
+  text-align: left;
+  font-size: 0.9em;
+  max-height: 150px; /* Limit height */
+  overflow-y: auto; /* Add scroll for many files */
+  padding: 5px 10px;
+  background-color: var(--color-background-mute);
+  border-radius: 4px;
+}
+
+.selected-files-list ul {
+  list-style: none;
+  padding: 0;
+  margin: 5px 0 0 0;
+}
+
+.selected-files-list li {
+  padding: 2px 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 

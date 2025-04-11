@@ -1,9 +1,8 @@
 @import './base.css';
 
 #app {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 1rem; /* Reduced padding as components have their own */
+  /* Removed max-width and margin: 0 auto to allow full width */
+  padding: 1rem 0; /* Keep vertical padding, remove horizontal */
   font-weight: normal;
 }
 
@@ -24,13 +23,14 @@ a,
 @media (min-width: 1024px) {
   body {
     display: flex;
-    place-items: center;
+    /* Align items to the start (top) instead of center */
+    align-items: flex-start;
   }
 
   #app {
     /* Remove grid layout, let components flow naturally */
     /* display: grid; */
     /* grid-template-columns: 1fr 1fr; */
-    padding: 0 1rem; /* Reduced padding */
+    /* Removed padding: 0 1rem; */
   }
 }

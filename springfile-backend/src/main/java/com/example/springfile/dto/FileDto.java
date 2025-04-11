@@ -1,14 +1,15 @@
 package com.example.springfile.dto;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
 import java.time.LocalDateTime;
 
 // DTO to transfer file information to the frontend
 public class FileDto {
-
     private Long id;
     private String fileName;
     private String fileType;
     private long size;
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm") // Format the timestamp for JSON output
     private LocalDateTime uploadTimestamp;
     private String categoryName; // Flattened data
     private String subcategoryName; // Flattened data

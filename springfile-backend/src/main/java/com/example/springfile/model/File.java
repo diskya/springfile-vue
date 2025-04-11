@@ -30,7 +30,8 @@ public class File {
     private Category category;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "subcategory_id", nullable = false)
+    // Explicitly define column as nullable in DDL
+    @JoinColumn(name = "subcategory_id", nullable = true, columnDefinition = "BIGINT NULL")
     private Subcategory subcategory;
 
     // Constructors

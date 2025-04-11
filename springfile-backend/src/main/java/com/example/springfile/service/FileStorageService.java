@@ -11,11 +11,18 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import java.nio.file.StandardCopyOption;
 import java.util.UUID;
+import org.springframework.core.io.Resource;
+import org.springframework.core.io.UrlResource;
+import java.net.MalformedURLException;
 
 @Service
 public class FileStorageService {
+
+    private static final Logger logger = LoggerFactory.getLogger(FileStorageService.class); // Add logger
 
     private final Path fileStorageLocation;
 
@@ -62,7 +69,35 @@ public class FileStorageService {
         }
     }
 
-    // Optional: Add methods to load/delete files if needed later
-    // public Resource loadFileAsResource(String fileName) { ... }
-    // public void deleteFile(String fileName) { ... }
+    public Resource loadFileAsResource(String storageIdentifier) {
+        try {
+            Path filePath = this.fileStorageLocation.resolve(storageIdentifier).normalize();
+            Resource resource = new UrlResource(filePath.toUri());
+            if (resource.exists()) {
+                return resource;
+            } else {
+                throw new RuntimeException("File not found " + storageIdentifier);
+            }
+        } catch (MalformedURLException ex) {
+            throw new RuntimeException("File not found " + storageIdentifier, ex);
+        }
+    }
+
+    public void deleteFile(String storageIdentifier) {
+        try {
+            Path targetLocation = this.fileStorageLocation.resolve(storageIdentifier).normalize();
+            boolean deleted = Files.deleteIfExists(targetLocation);
+            if (deleted) {
+                logger.info("Successfully deleted file: {}", targetLocation);
+            } else {
+                logger.warn("File to delete not found: {}", targetLocation);
+                // Depending on requirements, you might throw an exception here
+                // throw new RuntimeException("File not found: " + storageIdentifier);
+            }
+        } catch (IOException ex) {
+            logger.error("Could not delete file {}: {}", storageIdentifier, ex.getMessage(), ex);
+            // Wrap and rethrow or handle as appropriate for your application's error strategy
+            throw new RuntimeException("Could not delete file " + storageIdentifier + ". Please try again!", ex);
+        }
+    }
 }
