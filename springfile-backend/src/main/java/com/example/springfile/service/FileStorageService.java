@@ -69,6 +69,46 @@ public class FileStorageService {
         }
     }
 
+    /**
+     * Stores the content of a Resource as a new file with a unique identifier.
+     * The file extension is derived from the provided original filename.
+     *
+     * @param resource The resource containing the file content.
+     * @param originalFileNameForExtension The original filename to derive the extension from.
+     * @return The unique storage identifier (filename) generated for the new file.
+     */
+    public String storeFile(Resource resource, String originalFileNameForExtension) {
+        String cleanOriginalName = StringUtils.cleanPath(originalFileNameForExtension);
+        String fileExtension = "";
+        try {
+            // Check for invalid characters in the original name (for extension extraction safety)
+            if (cleanOriginalName.contains("..")) {
+                throw new RuntimeException("Sorry! Original filename contains invalid path sequence " + cleanOriginalName);
+            }
+
+            int dotIndex = cleanOriginalName.lastIndexOf('.');
+            if (dotIndex > 0) {
+                fileExtension = cleanOriginalName.substring(dotIndex);
+            }
+
+            // Generate a new unique file name
+            String uniqueFileName = UUID.randomUUID().toString() + fileExtension;
+
+            // Copy resource stream to the target location
+            Path targetLocation = this.fileStorageLocation.resolve(uniqueFileName).normalize();
+            logger.debug("Attempting to store new resource at: {}", targetLocation);
+
+            try (InputStream inputStream = resource.getInputStream()) {
+                Files.copy(inputStream, targetLocation, StandardCopyOption.REPLACE_EXISTING); // Use REPLACE_EXISTING for robustness, though UUID collision is unlikely
+                logger.info("Successfully stored new file: {}", uniqueFileName);
+            }
+            return uniqueFileName; // Return the new unique identifier
+        } catch (IOException ex) {
+            logger.error("Could not store resource {} (derived from {}): {}", resource.getDescription(), cleanOriginalName, ex.getMessage(), ex);
+            throw new RuntimeException("Could not store resource " + resource.getDescription() + ". Please try again!", ex);
+        }
+    }
+
     public Resource loadFileAsResource(String storageIdentifier) {
         try {
             Path filePath = this.fileStorageLocation.resolve(storageIdentifier).normalize();

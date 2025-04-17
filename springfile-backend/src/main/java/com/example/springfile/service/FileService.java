@@ -8,10 +8,12 @@ import com.example.springfile.repository.CategoryRepository;
 import com.example.springfile.repository.FileRepository;
 import com.example.springfile.repository.SubcategoryRepository;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import java.util.UUID; // Import UUID for task IDs
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -29,28 +31,43 @@ import java.io.InputStream;
 
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.ByteArrayResource;
+import org.springframework.http.MediaType;
+import org.springframework.http.client.MultipartBodyBuilder;
 import org.springframework.util.StreamUtils;
+import org.springframework.web.reactive.function.BodyInserters;
+import org.springframework.web.reactive.function.client.WebClient;
+import reactor.core.publisher.Mono;
 
 
 @Service
 public class FileService {
 
-    private static final Logger logger = LoggerFactory.getLogger(FileService.class); // Add logger
+    private static final Logger logger = LoggerFactory.getLogger(FileService.class);
 
     private final FileRepository fileRepository;
     private final CategoryRepository categoryRepository;
     private final SubcategoryRepository subcategoryRepository;
     private final FileStorageService fileStorageService;
+    private final WebClient fastapiWebClient;
+    private final AsyncTaskManager asyncTaskManager; // Added AsyncTaskManager
+
+    // Constants for FastAPI interaction
+    private static final String DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+    private static final String FASTAPI_PREPROCESS_ENDPOINT = "/preprocess/docx/";
 
     @Autowired
     public FileService(FileRepository fileRepository,
                        CategoryRepository categoryRepository,
                        SubcategoryRepository subcategoryRepository,
-                       FileStorageService fileStorageService) {
+                       FileStorageService fileStorageService,
+                       WebClient fastapiWebClient,
+                       AsyncTaskManager asyncTaskManager) { // Added AsyncTaskManager
         this.fileRepository = fileRepository;
         this.categoryRepository = categoryRepository;
         this.subcategoryRepository = subcategoryRepository;
         this.fileStorageService = fileStorageService;
+        this.fastapiWebClient = fastapiWebClient;
+        this.asyncTaskManager = asyncTaskManager; // Initialize AsyncTaskManager
     }
 
     @Transactional
@@ -224,5 +241,146 @@ public class FileService {
 
         logger.info("Successfully created ZIP archive in memory for file IDs: {}", fileIds);
         return new ByteArrayResource(baos.toByteArray());
+    }
+
+    // --- Preprocessing Logic (Now Asynchronous) ---
+
+    /**
+     * Initiates the asynchronous preprocessing of DOCX files.
+     * @param fileIds List of file IDs to process.
+     * @return The unique taskId for tracking this asynchronous operation.
+     */
+    public String startPreprocessingTask(List<Long> fileIds) {
+        String taskId = UUID.randomUUID().toString();
+        logger.info("Registering preprocessing task with ID: {} for file IDs: {}", taskId, fileIds);
+        asyncTaskManager.registerTask(taskId, "PROCESSING"); // Initial status
+        // Call the actual async method
+        preprocessFilesAsync(fileIds, taskId);
+        return taskId;
+    }
+
+    @Async // Mark this method to run asynchronously
+    @Transactional // Keep transactional for database operations within the async method
+    public void preprocessFilesAsync(List<Long> fileIds, String taskId) {
+        Map<Long, String> results = new HashMap<>();
+        logger.info("Task {} - Starting async preprocessing for file IDs: {}", taskId, fileIds);
+        String finalStatus = "COMPLETED"; // Assume success initially
+        String finalMessage = null;
+
+        try {
+            for (Long id : fileIds) {
+                String fileStatus; // Renamed from 'status' to avoid conflict
+            try {
+                Optional<File> fileOptional = fileRepository.findById(id);
+                if (fileOptional.isEmpty()) {
+                    logger.warn("Task {} - Preprocessing skipped: File not found for ID {}", taskId, id);
+                    fileStatus = "not_found";
+                    results.put(id, fileStatus);
+                    continue;
+                }
+
+                File file = fileOptional.get();
+                String originalFileName = file.getFileName();
+                String fileType = file.getFileType();
+
+                // Check if it's a DOCX file
+                boolean isDocx = originalFileName != null && originalFileName.toLowerCase().endsWith(".docx");
+                // Optional stricter check: && (DOCX_MIME_TYPE.equals(fileType) || fileType == null || fileType.isBlank());
+
+                if (!isDocx) {
+                    logger.info("Task {} - Preprocessing skipped: File ID {} ({}) is not a DOCX file.", taskId, id, originalFileName);
+                    fileStatus = "not_docx";
+                    results.put(id, fileStatus);
+                    continue;
+                }
+
+                logger.info("Task {} - Preprocessing file ID {} ({}). Loading resource...", taskId, id, originalFileName);
+                Resource originalResource = fileStorageService.loadFileAsResource(file.getStorageIdentifier());
+
+                if (!originalResource.exists() || !originalResource.isReadable()) {
+                    logger.error("Task {} - Preprocessing failed: Cannot read original file resource for ID {}", taskId, id);
+                    fileStatus = "error: cannot read original file";
+                    results.put(id, fileStatus);
+                    finalStatus = "FAILED"; // Mark overall task as failed if any file fails critically
+                    finalMessage = "Failed to read original file for ID " + id;
+                    continue; // Continue to next file ID
+                }
+
+                // Prepare request for FastAPI
+                MultipartBodyBuilder bodyBuilder = new MultipartBodyBuilder();
+                // Pass the resource directly. WebClient handles streaming.
+                // Ensure the filename is passed correctly for FastAPI to read it.
+                bodyBuilder.part("file", originalResource).filename(originalFileName);
+
+                logger.info("Task {} - Calling FastAPI to preprocess file ID {}", taskId, id);
+                // Call FastAPI service and block for the result (within the loop)
+                // Consider if parallel calls are needed for performance with many files.
+                Resource processedResource = fastapiWebClient.post()
+                        .uri(FASTAPI_PREPROCESS_ENDPOINT)
+                        .contentType(MediaType.MULTIPART_FORM_DATA)
+                        .body(BodyInserters.fromMultipartData(bodyBuilder.build()))
+                        .retrieve()
+                        // Handle potential errors from FastAPI
+                        .onStatus(httpStatus -> httpStatus.is4xxClientError() || httpStatus.is5xxServerError(), // Renamed lambda param
+                                  clientResponse -> clientResponse.bodyToMono(String.class)
+                                .flatMap(errorBody -> Mono.error(new RuntimeException("FastAPI error: " + clientResponse.statusCode() + " - " + errorBody))))
+                        .bodyToMono(Resource.class)
+                        .block(); // Blocking here simplifies logic but processes files sequentially.
+
+                if (processedResource != null) {
+                    logger.info("Task {} - Received processed resource from FastAPI for file ID {}", taskId, id);
+                    // Store the processed content as a NEW file
+                    String newStorageIdentifier = fileStorageService.storeFile(processedResource, originalFileName);
+
+                    // Create a new File entity for the processed file
+                    File processedFile = new File();
+                    String processedFileName = originalFileName.replaceFirst("(?i)\\.docx$", "_processed.docx");
+                    if (processedFileName.equals(originalFileName)) { // Handle case where extension wasn't found or name didn't end with .docx
+                        processedFileName = originalFileName + "_processed";
+                    }
+                    processedFile.setFileName(processedFileName);
+                    processedFile.setStorageIdentifier(newStorageIdentifier);
+                    processedFile.setFileType(DOCX_MIME_TYPE); // Assume it's still DOCX
+                    // Try to get size, handle potential exception
+                    try {
+                        processedFile.setSize(processedResource.contentLength());
+                    } catch (IOException e) {
+                        logger.warn("Task {} - Could not determine size of processed resource for original file ID {}: {}", taskId, id, e.getMessage());
+                        processedFile.setSize(-1L); // Indicate unknown size
+                    }
+                    processedFile.setCategory(file.getCategory());
+                    processedFile.setSubcategory(file.getSubcategory()); // Copy subcategory from original
+                    processedFile.setUploadTimestamp(LocalDateTime.now()); // Set new timestamp
+
+                    fileRepository.save(processedFile);
+
+                    logger.info("Task {} - Successfully processed file ID {} and saved as new file with ID {} and storage ID {}",
+                            taskId, id, processedFile.getId(), newStorageIdentifier);
+                    fileStatus = "processed_new_file_id=" + processedFile.getId();
+                } else {
+                    logger.error("Task {} - Preprocessing failed: No processed resource received from FastAPI for file ID {}", taskId, id);
+                    fileStatus = "error: no processed data received";
+                    finalStatus = "FAILED"; // Mark overall task as failed
+                    finalMessage = (finalMessage == null ? "" : finalMessage + "; ") + "No processed data for ID " + id;
+                }
+
+            } catch (Exception e) {
+                logger.error("Task {} - Preprocessing failed for file ID {}: {}", taskId, id, e.getMessage(), e);
+                fileStatus = "error: " + e.getMessage();
+                finalStatus = "FAILED"; // Mark overall task as failed
+                finalMessage = (finalMessage == null ? "" : finalMessage + "; ") + "Error processing ID " + id + ": " + e.getMessage();
+            }
+            results.put(id, fileStatus);
+        } // End of loop through fileIds
+
+        // Update the final task status
+        logger.info("Task {} - Async preprocessing finished. Final Status: {}, Results: {}", taskId, finalStatus, results);
+        asyncTaskManager.updateTaskStatus(taskId, finalStatus, finalMessage, results);
+
+    } catch (Exception e) {
+        // Catch unexpected errors during the async execution
+        logger.error("Task {} - Unexpected error during async preprocessing task: {}", taskId, e.getMessage(), e);
+        asyncTaskManager.updateTaskStatus(taskId, "FAILED", "Unexpected error: " + e.getMessage(), results);
+    }
     }
 }

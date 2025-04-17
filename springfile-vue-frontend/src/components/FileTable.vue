@@ -1,6 +1,13 @@
 <template>
   <div class="file-list-container">
 
+    <!-- Processing Status Indicator -->
+    <div v-if="processingStatus !== 'idle'" class="status-indicator" :class="`status-${processingStatus}`">
+      <span>{{ processingMessage }}</span>
+      <span v-if="processingStatus === 'done'" class="status-done"> ✔ Done</span>
+      <button @click="dismissStatus" class="close-status-button" title="Dismiss status">×</button>
+    </div>
+
     <!-- Toolbar: Search and Delete Button -->
     <div class="toolbar">
       <div class="search-container">
@@ -22,6 +29,14 @@
       >
         Download ({{ selectedFileIds.size }})
       </button>
+      <button
+        class="process-docx-button"
+        @click="processSelectedDocxFiles"
+        :disabled="selectedFileIds.size === 0 || !hasSelectedDocx"
+        :title="hasSelectedDocx ? `Process ${selectedDocxCount} selected DOCX file(s)` : 'Select DOCX files to process'"
+      >
+        Process DOCX ({{ selectedDocxCount }})
+      </button>
     </div>
 
     <!-- Loading/Error State -->
@@ -29,7 +44,8 @@
     <div v-if="filesError" class="error-message">{{ filesError }}</div>
 
     <!-- Files Table Wrapper for Responsiveness -->
-    <div class="table-wrapper" v-if="!isLoadingFiles && !filesError && filteredFiles.length > 0">
+    <!-- Removed !isLoadingFiles and length check to prevent flicker/collapse during refresh -->
+    <div class="table-wrapper" v-if="!filesError">
       <table class="files-table">
         <thead>
           <tr>
@@ -41,7 +57,7 @@
           <th>Uploaded At</th>
         </tr>
       </thead>
-      <tbody>
+      <tbody v-if="filteredFiles.length > 0"> <!-- Revert to v-if, rely on wrapper min-height -->
         <tr
           v-for="(file, index) in filteredFiles"
           :key="file.id"
@@ -60,15 +76,15 @@
       </table>
     </div>
 
-    <!-- No Files Message -->
-    <div v-if="!isLoadingFiles && !filesError && filteredFiles.length === 0" class="no-files-message">
-      {{ searchTerm ? 'No files match your search.' : 'No files uploaded yet.' }}
-    </div>
+<!-- No Files Message (Show only when not loading, no error, and the base list is actually empty) -->
+<div v-if="!isLoadingFiles && !filesError && filesList.length === 0" class="no-files-message">
+  {{ searchTerm ? 'No files match your search.' : 'No files uploaded yet.' }}
+</div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, nextTick } from 'vue'; // Import nextTick
 
 const filesList = ref([]);
 const isLoadingFiles = ref(false);
@@ -76,6 +92,14 @@ const filesError = ref('');
 const searchTerm = ref('');
 const selectedFileIds = ref(new Set()); // Use a Set for efficient add/delete/has checks
 const lastSelectedIndex = ref(-1); // For Shift+Click selection
+
+// --- State for DOCX Processing Polling ---
+const processingTaskId = ref(null);
+const processingStatus = ref('idle'); // 'idle', 'processing', 'done', 'failed'
+const processingMessage = ref('');
+const pollingIntervalId = ref(null);
+const POLLING_INTERVAL_MS = 3000; // Check status every 3 seconds
+
 
 const filteredFiles = computed(() => {
   if (!searchTerm.value) {
@@ -94,6 +118,24 @@ const selectedFiles = computed(() => {
   return filesList.value.filter(file => selectedFileIds.value.has(file.id));
 });
 
+// Computed property to check if any selected file is a DOCX
+const hasSelectedDocx = computed(() => {
+  // Check fileType (more reliable) or fallback to fileName extension
+  return selectedFiles.value.some(file =>
+    file.fileType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+    (file.fileName && file.fileName.toLowerCase().endsWith('.docx'))
+  );
+});
+
+// Computed property to count selected DOCX files for the button label
+const selectedDocxCount = computed(() => {
+  return selectedFiles.value.filter(file =>
+    file.fileType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+    (file.fileName && file.fileName.toLowerCase().endsWith('.docx'))
+  ).length;
+});
+
+
 const formatFileSize = (bytes) => {
   if (bytes === undefined || bytes === null) return 'N/A';
   if (bytes < 1024) return bytes + ' B';
@@ -108,25 +150,46 @@ const formatTimestamp = (timestampString) => {
 
 
 const fetchFiles = async () => {
-  isLoadingFiles.value = true;
+  isLoadingFiles.value = true; // Keep loading indicator logic
   filesError.value = '';
+  // Removed: filesList.value = []; // Don't clear the list prematurely
+
   try {
     const response = await fetch('/api/files');
-    if (!response.ok) {
-      if (response.status === 204) {
-        filesList.value = [];
-        return;
+
+    if (response.ok) {
+      // Handle 204 No Content (empty list) or 200 OK (parse JSON)
+      if (response.status !== 204) {
+        const data = await response.json();
+        // Basic check if data is an array before sorting
+        const fetchedData = Array.isArray(data)
+          ? data.sort((a, b) => new Date(b.uploadTimestamp) - new Date(a.uploadTimestamp))
+          : [];
+         if (!Array.isArray(data)) {
+             console.warn("Received non-array data from /api/files, expected array:", data);
+             // If data is invalid, keep the old list instead of clearing it
+         } else {
+             // Assign fetched data only if valid
+             filesList.value = fetchedData;
+         }
+      } else {
+          // Handle 204 No Content: Clear the list if it was previously populated
+          filesList.value = [];
       }
-      const errorText = await response.text();
-      throw new Error(`Failed to load files: ${response.status} ${response.statusText} - ${errorText}`);
+    } else {
+      // Handle non-OK responses (e.g., 500)
+      // Don't clear the list on fetch error, keep showing old data
+      throw new Error(`Failed to load files: ${response.status} ${response.statusText}`);
     }
-    const data = await response.json();
-    filesList.value = data.sort((a, b) => new Date(b.uploadTimestamp) - new Date(a.uploadTimestamp));
+
   } catch (error) {
     console.error('Error fetching files:', error);
     filesError.value = `Error loading files: ${error.message}`;
-    filesList.value = [];
+    // Don't clear the list on fetch error
+    // filesList.value = [];
   } finally {
+    // Wait for the DOM to update after potential filesList change before hiding loading
+    await nextTick();
     isLoadingFiles.value = false;
   }
 };
@@ -353,16 +416,186 @@ const handleDownload = async () => {
   }
 };
 
+
+// --- Polling and Status Logic ---
+const checkProcessingStatus = async (taskId) => {
+  if (!taskId) return;
+  console.log(`Polling status for task ID: ${taskId}`);
+  try {
+    // Corrected the fetch URL to include /api/files base path
+    const response = await fetch(`/api/files/process/status/${taskId}`);
+    if (!response.ok) {
+      // Handle non-OK status check response (e.g., 404 if task ID is invalid/expired)
+      console.error(`Status check failed for task ${taskId}: ${response.status}`);
+      processingMessage.value = `Error checking status for task ${taskId}.`;
+      processingStatus.value = 'failed';
+      clearInterval(pollingIntervalId.value);
+      pollingIntervalId.value = null;
+      return;
+    }
+
+    const data = await response.json();
+    console.log(`Status for task ${taskId}:`, data.status);
+
+    // Backend should return status like 'PROCESSING', 'COMPLETED', 'FAILED'
+    if (data.status === 'COMPLETED') {
+      clearInterval(pollingIntervalId.value);
+      pollingIntervalId.value = null;
+      processingStatus.value = 'done';
+      // Construct message based on results if available
+      let doneMessage = "Processing complete.";
+      if (data.results) {
+          const processedCount = Object.values(data.results).filter(r => r === 'processed').length;
+          const skippedCount = Object.values(data.results).filter(r => r === 'not_docx' || r === 'not_found').length;
+          const errorCount = Object.values(data.results).filter(r => r.startsWith('error')).length;
+          doneMessage = `Processing complete. Processed: ${processedCount}, Skipped/Not Found: ${skippedCount}, Errors: ${errorCount}.`;
+          console.log("Detailed processing results:", data.results);
+      }
+      processingMessage.value = doneMessage;
+      await fetchFiles(); // Refresh the table now that processing is done
+    } else if (data.status === 'FAILED') {
+      clearInterval(pollingIntervalId.value);
+      pollingIntervalId.value = null;
+      processingStatus.value = 'failed';
+      processingMessage.value = `Processing failed: ${data.error || 'Unknown error'}`; // Assuming backend provides an 'error' field
+      console.error(`Processing task ${taskId} failed:`, data.error);
+    } else if (data.status === 'PROCESSING') {
+      // Continue polling, message already set
+    } else {
+      // Unexpected status
+      console.warn(`Unexpected status received for task ${taskId}: ${data.status}`);
+      processingMessage.value = `Unexpected status: ${data.status}`;
+      // Optionally stop polling on unexpected status
+      // clearInterval(pollingIntervalId.value);
+      // pollingIntervalId.value = null;
+      // processingStatus.value = 'failed';
+    }
+
+  } catch (error) {
+    console.error(`Error during status check for task ${taskId}:`, error);
+    // Decide how to handle fetch errors during polling (e.g., stop polling, show error)
+    processingMessage.value = `Error checking status: ${error.message}`;
+    processingStatus.value = 'failed'; // Or keep polling? Depends on desired behavior.
+    clearInterval(pollingIntervalId.value);
+    pollingIntervalId.value = null;
+  }
+};
+
+const startPolling = (taskId) => {
+  if (pollingIntervalId.value) {
+    clearInterval(pollingIntervalId.value); // Clear any existing interval
+  }
+  // Initial check immediately
+  checkProcessingStatus(taskId);
+  // Then set interval for subsequent checks
+  pollingIntervalId.value = setInterval(() => checkProcessingStatus(taskId), POLLING_INTERVAL_MS);
+};
+
+const dismissStatus = () => {
+  if (pollingIntervalId.value) {
+    clearInterval(pollingIntervalId.value);
+    pollingIntervalId.value = null;
+  }
+  processingStatus.value = 'idle';
+  processingMessage.value = '';
+  processingTaskId.value = null;
+};
+
+
+// --- Process DOCX Logic ---
+const processSelectedDocxFiles = async () => {
+  const idsToProcess = selectedFiles.value
+    .filter(file =>
+      file.fileType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+      (file.fileName && file.fileName.toLowerCase().endsWith('.docx'))
+    )
+    .map(file => file.id);
+
+  if (idsToProcess.length === 0) {
+    // Safeguard, though button should be disabled
+    console.warn('Process DOCX clicked, but no eligible DOCX files are selected.');
+    filesError.value = 'No DOCX files selected for processing.';
+    return;
+  }
+
+  if (!window.confirm(`Are you sure you want to process ${idsToProcess.length} selected DOCX file(s)?`)) {
+    return;
+  }
+
+  // Clear previous general errors and dismiss any old status messages
+  filesError.value = '';
+  dismissStatus(); // Clear previous polling state/message
+
+  // --- Set status immediately after confirmation ---
+  processingStatus.value = 'processing';
+  processingMessage.value = `Initiating processing for ${idsToProcess.length} DOCX file(s)...`;
+  // ---------------------------------------------
+
+  try {
+    console.log(`Sending request to initiate DOCX processing for IDs: ${idsToProcess}`);
+    const response = await fetch('/api/files/process/docx', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(idsToProcess),
+    });
+
+    // --- Handle Initial Response ---
+    if (response.status === 202) {
+      // Accepted: Processing started, begin polling
+      const responseData = await response.json(); // Expecting {"taskId": "..."}
+      if (responseData.taskId) {
+        processingTaskId.value = responseData.taskId;
+        // Update message to include task ID, status is already 'processing'
+        processingMessage.value = `Processing ${idsToProcess.length} DOCX file(s)... (Task ID: ${responseData.taskId.substring(0, 8)})`;
+        startPolling(responseData.taskId);
+      } else {
+        // 202 but no taskId? Treat as an error.
+        console.error('Processing accepted (202) but no taskId received.');
+        processingStatus.value = 'failed';
+        processingMessage.value = 'Processing started but failed to get status tracking ID.';
+      }
+    } else if (response.ok) {
+        // Unexpected OK response (e.g., 200) - maybe backend is synchronous?
+        console.warn('Received OK response instead of 202 Accepted. Assuming synchronous completion.');
+        processingStatus.value = 'done'; // Assume done
+        processingMessage.value = 'Processing completed (synchronously).';
+        await fetchFiles(); // Refresh immediately
+    } else {
+      // Handle other non-OK responses (4xx, 5xx) for the initial request
+      const errorData = await response.json().catch(() => ({})); // Try to parse error JSON
+      console.error('DOCX processing initiation failed:', response.status, errorData);
+      processingStatus.value = 'failed';
+      processingMessage.value = `Failed to start processing: ${errorData.message || response.statusText}`;
+      processingTaskId.value = null; // Ensure no task ID is stored
+    }
+
+  } catch (error) {
+    // Handle fetch errors for the initial request
+    console.error('Error initiating DOCX processing request:', error);
+    processingStatus.value = 'failed';
+    processingMessage.value = `Error starting processing: ${error.message}`;
+    processingTaskId.value = null;
+    if (pollingIntervalId.value) { // Ensure polling stops if fetch fails
+        clearInterval(pollingIntervalId.value);
+        pollingIntervalId.value = null;
+    }
+  }
+  // Note: isLoadingFiles is no longer managed here as polling handles the duration
+};
+
 </script>
 
 <style scoped>
 .file-list-container {
+  position: relative; /* Establish positioning context for absolute children */
   margin-top: 0; /* Removed top margin, handled by App.vue spacing */
   width: 95%;
 /* Center the container both horizontally but top aligned */
   margin-left: auto;
   margin-right: auto;
-
+  min-height: 50vh; /* Add min-height to prevent collapsing during refresh */
 }
 
 .file-list-container h2 {
@@ -429,6 +662,28 @@ const handleDownload = async () => {
   opacity: 0.65;
 }
 
+.process-docx-button {
+  padding: 8px 15px;
+  background-color: #28a745; /* Green color for process */
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9em;
+  transition: background-color 0.3s ease;
+  white-space: nowrap;
+}
+
+.process-docx-button:hover:not(:disabled) {
+  background-color: #218838; /* Darker green on hover */
+}
+
+.process-docx-button:disabled {
+  background-color: #6c757d; /* Grey out when disabled */
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
 
 .search-container input {
   width: 100%;
@@ -458,6 +713,7 @@ const handleDownload = async () => {
 .table-wrapper {
   overflow-x: auto; /* Enable horizontal scrolling on smaller screens */
   width: 100%;
+  min-height: 300px; /* Add minimum height to prevent collapse during refresh */
 }
 
 .files-table th,
@@ -496,8 +752,23 @@ const handleDownload = async () => {
   background-color: hsla(210, 100%, 70%, 0.3); /* Slightly darker blue on hover when selected */
 }
 
+/* Make loading message overlay instead of pushing content */
+.loading-message {
+  position: absolute;
+  top: 100px; /* Adjust as needed, below toolbar/status */
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: rgba(255, 255, 255, 0.8); /* Semi-transparent background */
+  padding: 15px 25px;
+  border-radius: 5px;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+  z-index: 10; /* Ensure it's above other content */
+  color: var(--color-text); /* Use text color */
+  font-size: 0.95em;
+  text-align: center;
+  /* Remove margin-top as it's positioned absolutely */
+}
 
-.loading-message,
 .error-message,
 .no-files-message {
   text-align: center;
@@ -514,5 +785,58 @@ const handleDownload = async () => {
   border: 1px solid hsla(0, 80%, 60%, 0.3);
   border-radius: 4px;
   padding: 10px; /* Consistent padding */
+}
+
+/* --- Status Indicator Styles --- */
+.status-indicator {
+  padding: 10px 15px;
+  margin-bottom: 15px; /* Space below the indicator */
+  border-radius: 4px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.9em;
+  border: 1px solid transparent;
+}
+
+.status-processing {
+  background-color: hsla(210, 100%, 70%, 0.15); /* Light blue background */
+  border-color: hsla(210, 100%, 70%, 0.3);
+  color: hsla(210, 80%, 45%, 1); /* Blue text */
+}
+
+.status-done {
+  background-color: hsla(120, 60%, 70%, 0.15); /* Light green background */
+  border-color: hsla(120, 60%, 70%, 0.3);
+  color: hsla(120, 50%, 35%, 1); /* Green text */
+}
+
+.status-failed {
+  background-color: hsla(0, 80%, 70%, 0.15); /* Light red background */
+  border-color: hsla(0, 80%, 70%, 0.3);
+  color: hsla(0, 70%, 45%, 1); /* Red text */
+}
+
+.status-done .status-done { /* Style the "✔ Done" text specifically */
+  font-weight: bold;
+  margin-left: 8px;
+  color: hsla(120, 50%, 30%, 1); /* Darker green for emphasis */
+}
+
+.close-status-button {
+  background: none;
+  border: none;
+  color: inherit; /* Inherit color from parent (.status-indicator) */
+  font-size: 1.2em;
+  font-weight: bold;
+  cursor: pointer;
+  padding: 0 5px;
+  line-height: 1;
+  opacity: 0.7;
+  transition: opacity 0.2s ease;
+}
+
+.close-status-button:hover {
+  opacity: 1;
 }
 </style>

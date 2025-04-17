@@ -1,10 +1,12 @@
 package com.example.springfile.controller;
 
-import com.example.springfile.dto.FileDto; // Import DTO
+import com.example.springfile.dto.FileDto;
 import com.example.springfile.model.File;
+import com.example.springfile.service.AsyncTaskManager; // Import AsyncTaskManager
 import com.example.springfile.service.FileService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import java.util.UUID; // Import UUID (though task ID generation moved to service)
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -32,11 +34,34 @@ public class FileController {
     private static final Logger logger = LoggerFactory.getLogger(FileController.class);
 
     private final FileService fileService;
+    private final AsyncTaskManager asyncTaskManager; // Inject AsyncTaskManager
 
     @Autowired
-    public FileController(FileService fileService) {
+    public FileController(FileService fileService, AsyncTaskManager asyncTaskManager) { // Add to constructor
         this.fileService = fileService;
+        this.asyncTaskManager = asyncTaskManager; // Initialize
     }
+
+    // --- Task Status Endpoint ---
+
+    @GetMapping("/process/status/{taskId}") // Changed path to match frontend expectation
+    public ResponseEntity<?> getTaskStatus(@PathVariable String taskId) {
+        logger.debug("Received request for task status: {}", taskId);
+        AsyncTaskManager.TaskStatus status = asyncTaskManager.getTaskStatus(taskId);
+
+        if (status != null) {
+            logger.debug("Returning status for task {}: {}", taskId, status.getStatus());
+            // Return the whole status object which might contain status, message, results
+            return ResponseEntity.ok(status);
+        } else {
+            logger.warn("Status not found for task ID: {}", taskId);
+            // Return 404 Not Found if the task ID is unknown
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("message", "Task not found or already cleaned up."));
+        }
+    }
+
+
+    // --- Existing Endpoints ---
 
     @PostMapping("/upload")
     public ResponseEntity<?> uploadFiles(@RequestParam("files") MultipartFile[] files, // Changed to accept array
@@ -234,6 +259,30 @@ public class FileController {
         } catch (Exception e) {
             logger.error("Unexpected error during ZIP archive creation for file IDs {}: {}", fileIds, e.getMessage(), e);
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "An unexpected error occurred during ZIP creation.", e);
+        }
+    }
+
+    @PostMapping("/process/docx")
+    public ResponseEntity<?> processDocxFilesAsync(@RequestBody List<Long> fileIds) {
+        if (fileIds == null || fileIds.isEmpty()) {
+            logger.warn("Received empty file ID list for async DOCX processing.");
+            return ResponseEntity.badRequest().body(Map.of("message", "File IDs cannot be empty"));
+        }
+        logger.info("Received request to start async processing for DOCX files with IDs: {}", fileIds);
+
+        try {
+            // Start the async task and get the task ID
+            String taskId = fileService.startPreprocessingTask(fileIds);
+            logger.info("Started async DOCX processing task with ID: {}", taskId);
+
+            // Return 202 Accepted with the task ID
+            return ResponseEntity.accepted().body(Map.of("taskId", taskId));
+
+        } catch (Exception e) {
+            // Handle exceptions during the *initiation* of the task
+            logger.error("Failed to initiate async DOCX processing for IDs {}: {}", fileIds, e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("message", "Failed to start the processing task: " + e.getMessage()));
         }
     }
 }
