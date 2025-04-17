@@ -55,6 +55,7 @@
           <th>Category</th>
           <th>Subcategory</th>
           <th>Uploaded At</th>
+          <th>Preview</th> <!-- Add Preview Header -->
         </tr>
       </thead>
       <tbody v-if="filteredFiles.length > 0"> <!-- Revert to v-if, rely on wrapper min-height -->
@@ -71,6 +72,19 @@
           <td>{{ file.categoryName || 'N/A' }}</td>
           <td>{{ file.subcategoryName || '' }}</td>
           <td>{{ formatTimestamp(file.uploadTimestamp) }}</td>
+          <td class="preview-cell"> <!-- Add Preview Cell -->
+            <span
+              v-if="isFileTypePreviewable(file)"
+              @click.stop="previewFile(file)"
+              class="preview-icon"
+              title="Preview file"
+            >
+              👁️
+            </span>
+            <span v-else class="preview-icon disabled" title="Preview not available for this file type">
+              👁️
+            </span>
+          </td>
         </tr>
       </tbody>
       </table>
@@ -197,6 +211,58 @@ const fetchFiles = async () => {
 defineExpose({
   fetchFiles
 });
+
+// --- Preview Logic ---
+
+// Define previewable types
+const NATIVE_PREVIEW_TYPES = [
+  'image/jpeg', 'image/png', 'image/gif', 'image/svg+xml', 'image/webp',
+  'application/pdf',
+  // Removed text/plain unless specifically requested later
+];
+// Removed GOOGLE_DOCS_VIEWER_TYPES as they are not usable locally
+
+// Helper to check if a file type is previewable natively by the browser
+const isFileTypePreviewable = (file) => {
+  const fileType = file.fileType || '';
+  const fileName = file.fileName || '';
+  // Prioritize MIME type if available
+  if (fileType) {
+    return NATIVE_PREVIEW_TYPES.includes(fileType);
+  }
+  // Fallback to extension for common types if MIME type is missing
+  // Fallback to extension for common image/PDF types if MIME type is missing
+  if (fileName.endsWith('.pdf')) return true;
+  if (fileName.match(/\.(jpe?g|png|gif|svg|webp)$/i)) return true;
+  // Removed fallback checks for DOCX, XLSX, PPTX, TXT
+
+  return false; // Default to not previewable
+};
+
+
+const previewFile = (file) => {
+  if (!isFileTypePreviewable(file)) {
+    console.warn(`Preview attempt for non-previewable file: ${file.fileName}`);
+    return;
+  }
+
+  const fileType = file.fileType || '';
+  const fileName = file.fileName || ''; // Use for fallback check if needed
+  const fileId = file.id;
+  const backendViewUrl = `/api/files/view/${fileId}`;
+
+  // Only handle native preview types now
+  if (isFileTypePreviewable(file)) { // Re-check here for safety, though UI should prevent click
+    console.log(`Opening native preview for: ${fileName}`);
+    window.open(backendViewUrl, '_blank');
+  } else {
+    // This case should not be reached if the icon is correctly disabled
+    console.warn(`Preview attempt for non-previewable file type: ${fileName} (Type: ${fileType})`);
+    // Optionally show an alert, but the disabled icon is the primary feedback
+    // alert('Preview is not available for this file type.');
+  }
+};
+
 
 onMounted(() => {
   fetchFiles();
@@ -838,5 +904,27 @@ const processSelectedDocxFiles = async () => {
 
 .close-status-button:hover {
   opacity: 1;
+}
+
+/* --- Preview Column Styles --- */
+.preview-cell {
+  text-align: center; /* Center the icon */
+  width: 80px; /* Fixed width for the preview column */
+}
+
+.preview-icon {
+  cursor: pointer;
+  font-size: 1.3em; /* Make icon slightly larger */
+  opacity: 0.8;
+  transition: opacity 0.2s ease;
+}
+
+.preview-icon:hover {
+  opacity: 1;
+}
+
+.preview-icon.disabled {
+  cursor: not-allowed;
+  opacity: 0.3;
 }
 </style>

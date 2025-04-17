@@ -225,6 +225,46 @@ public class FileController {
         }
     }
 
+    @GetMapping("/view/{fileId}")
+    public ResponseEntity<Resource> viewFile(@PathVariable Long fileId) {
+        try {
+            logger.info("Received request to view file with ID: {}", fileId);
+            Map<String, Object> fileData = fileService.getFileForDownload(fileId); // Re-use existing service method
+            Resource resource = (Resource) fileData.get("resource");
+            String originalFileName = (String) fileData.get("fileName"); // Keep original name for context, though not strictly needed for inline
+            String contentType = (String) fileData.get("fileType");
+
+            // Fallback content type if not available
+            if (contentType == null || contentType.isBlank()) {
+                contentType = "application/octet-stream"; // Browser might still download if it doesn't know how to display
+                logger.warn("Content type not found for file ID: {}. Using default: {}", fileId, contentType);
+            }
+
+            logger.info("Prepared file '{}' (type: {}) for inline viewing.", originalFileName, contentType);
+
+            // Key difference: Content-Disposition is "inline"
+            return ResponseEntity.ok()
+                    .contentType(org.springframework.http.MediaType.parseMediaType(contentType))
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + originalFileName + "\"") // Use simple filename format for inline
+                    .body(resource);
+
+        } catch (RuntimeException e) {
+            // Handle file not found specifically
+            if (e.getMessage().startsWith("File not found")) {
+                 logger.error("File not found error for view request ID {}: {}", fileId, e.getMessage());
+                 throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage(), e);
+            }
+            // Handle other potential errors from service layer
+            logger.error("Error preparing file view for ID {}: {}", fileId, e.getMessage(), e);
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Could not view the file.", e);
+        } catch (Exception e) {
+            // Catch unexpected errors
+            logger.error("Unexpected error during file view for ID {}: {}", fileId, e.getMessage(), e);
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "An unexpected error occurred.", e);
+        }
+    }
+
+
     @PostMapping("/download/batch") // Use POST since we send a body
     public ResponseEntity<Resource> downloadFilesAsZip(@RequestBody List<Long> fileIds) {
         if (fileIds == null || fileIds.isEmpty()) {
