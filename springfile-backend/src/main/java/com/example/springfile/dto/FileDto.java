@@ -13,12 +13,13 @@ public class FileDto {
     private LocalDateTime uploadTimestamp;
     private String categoryName; // Flattened data
     private String subcategoryName; // Flattened data
+    private boolean embedding; // Add embedding status
 
     // Constructors
     public FileDto() {
     }
 
-    public FileDto(Long id, String fileName, String fileType, long size, LocalDateTime uploadTimestamp, String categoryName, String subcategoryName) {
+    public FileDto(Long id, String fileName, String fileType, long size, LocalDateTime uploadTimestamp, String categoryName, String subcategoryName, boolean embedding) {
         this.id = id;
         this.fileName = fileName;
         this.fileType = fileType;
@@ -26,6 +27,7 @@ public class FileDto {
         this.uploadTimestamp = uploadTimestamp;
         this.categoryName = categoryName;
         this.subcategoryName = subcategoryName;
+        this.embedding = embedding; // Assign embedding status
     }
 
     // Getters and Setters
@@ -83,5 +85,13 @@ public class FileDto {
 
     public void setSubcategoryName(String subcategoryName) {
         this.subcategoryName = subcategoryName;
+    }
+
+    public boolean isEmbedding() {
+        return embedding;
+    }
+
+    public void setEmbedding(boolean embedding) {
+        this.embedding = embedding;
     }
 }

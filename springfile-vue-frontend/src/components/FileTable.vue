@@ -37,6 +37,14 @@
       >
         Process DOCX ({{ selectedDocxCount }})
       </button>
+      <button
+        class="embed-button"
+        @click="triggerEmbedding"
+        :disabled="selectedFileIds.size === 0"
+        title="Trigger embedding for selected files"
+      >
+        Embed ({{ selectedFileIds.size }})
+      </button>
     </div>
 
     <!-- Loading/Error State -->
@@ -55,6 +63,7 @@
           <th>Category</th>
           <th>Subcategory</th>
           <th>Uploaded At</th>
+          <th>Embedding</th> <!-- Add Embedding Status Header -->
           <th>Preview</th> <!-- Add Preview Header -->
         </tr>
       </thead>
@@ -72,6 +81,7 @@
           <td>{{ file.categoryName || 'N/A' }}</td>
           <td>{{ file.subcategoryName || '' }}</td>
           <td>{{ formatTimestamp(file.uploadTimestamp) }}</td>
+          <td>{{ file.embedding ? 'Yes' : 'No' }}</td> <!-- Display Embedding Status -->
           <td class="preview-cell"> <!-- Add Preview Cell -->
             <span
               v-if="isFileTypePreviewable(file)"
@@ -651,6 +661,61 @@ const processSelectedDocxFiles = async () => {
   // Note: isLoadingFiles is no longer managed here as polling handles the duration
 };
 
+
+// --- Trigger Embedding Logic ---
+const triggerEmbedding = async () => {
+  const idsToEmbed = Array.from(selectedFileIds.value);
+  if (idsToEmbed.length === 0) {
+    console.warn('Embed button clicked with no selection.');
+    return;
+  }
+
+  // Optional: Confirmation dialog
+  // if (!window.confirm(`Are you sure you want to trigger embedding for ${idsToEmbed.length} file(s)?`)) {
+  //   return;
+  // }
+
+  // Use the status indicator for feedback
+  dismissStatus(); // Clear previous status
+  processingStatus.value = 'processing'; // Use 'processing' state visually
+  processingMessage.value = `Sending embedding request for ${idsToEmbed.length} file(s)...`;
+  filesError.value = ''; // Clear general errors
+
+  try {
+    console.log(`Sending request to trigger embedding for IDs: ${idsToEmbed}`);
+    const response = await fetch('/api/files/embed', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(idsToEmbed),
+    });
+
+    const responseData = await response.json().catch(() => ({})); // Try parsing JSON
+
+    if (response.ok) {
+      console.log('Embedding request successful:', responseData);
+      processingStatus.value = 'done'; // Use 'done' state visually
+      processingMessage.value = responseData.message || `Embedding request sent successfully for ${idsToEmbed.length} file(s).`;
+      // Optionally clear selection after success
+      // selectedFileIds.value.clear();
+      // lastSelectedIndex.value = -1;
+    } else {
+      console.error('Embedding request failed:', response.status, responseData);
+      processingStatus.value = 'failed'; // Use 'failed' state visually
+      processingMessage.value = `Embedding request failed: ${responseData.message || response.statusText}`;
+    }
+
+  } catch (error) {
+    console.error('Error sending embedding request:', error);
+    processingStatus.value = 'failed'; // Use 'failed' state visually
+    processingMessage.value = `Error sending embedding request: ${error.message}`;
+  }
+  // Note: We don't clear the selection here automatically, user can dismiss the status.
+  // We also don't refresh the file list as the embedding happens in the background.
+};
+
+
 </script>
 
 <style scoped>
@@ -745,6 +810,28 @@ const processSelectedDocxFiles = async () => {
 }
 
 .process-docx-button:disabled {
+  background-color: #6c757d; /* Grey out when disabled */
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.embed-button {
+  padding: 8px 15px;
+  background-color: #6f42c1; /* Purple color for embedding */
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9em;
+  transition: background-color 0.3s ease;
+  white-space: nowrap;
+}
+
+.embed-button:hover:not(:disabled) {
+  background-color: #5a32a3; /* Darker purple on hover */
+}
+
+.embed-button:disabled {
   background-color: #6c757d; /* Grey out when disabled */
   cursor: not-allowed;
   opacity: 0.65;

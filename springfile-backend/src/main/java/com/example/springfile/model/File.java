@@ -34,6 +34,9 @@ public class File {
     @JoinColumn(name = "subcategory_id", nullable = true, columnDefinition = "BIGINT NULL")
     private Subcategory subcategory;
 
+    @Column(nullable = false, columnDefinition = "BOOLEAN DEFAULT FALSE")
+    private boolean embedding = false; // Default to false
+
     // Constructors
     public File() {
         this.uploadTimestamp = LocalDateTime.now();
@@ -47,6 +50,7 @@ public class File {
         this.category = category;
         this.subcategory = subcategory;
         this.uploadTimestamp = LocalDateTime.now();
+        this.embedding = false; // Initialize in constructor
     }
 
     // Getters and Setters
@@ -114,6 +118,14 @@ public class File {
         this.subcategory = subcategory;
     }
 
+    public boolean isEmbedding() {
+        return embedding;
+    }
+
+    public void setEmbedding(boolean embedding) {
+        this.embedding = embedding;
+    }
+
     @Override
     public String toString() {
         return "File{" +
@@ -125,6 +137,7 @@ public class File {
                ", uploadTimestamp=" + uploadTimestamp +
                ", categoryId=" + (category != null ? category.getId() : "null") +
                ", subcategoryId=" + (subcategory != null ? subcategory.getId() : "null") +
+               ", embedding=" + embedding +
                '}';
     }
 

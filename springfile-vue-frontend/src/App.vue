@@ -1,41 +1,38 @@
 <template>
-  <div id="app" class="app-layout">
-    <Sidebar @upload-success="refreshFileList" />
-    <main class="main-content">
-      <FileTable ref="fileTableRef" />
-    </main>
+  <div id="app">
+    <!-- RouterView will render the component based on the current route -->
+    <router-view />
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue';
-import Sidebar from './components/Sidebar.vue';
-import FileTable from './components/FileTable.vue';
-
-const fileTableRef = ref(null);
-
-const refreshFileList = () => {
-  if (fileTableRef.value) {
-    fileTableRef.value.fetchFiles();
-  } else {
-    console.warn("FileTable component ref not available yet.");
-  }
-};
-
-onMounted(() => {
-});
+// No specific logic needed here anymore as it's handled by the views
+// Imports for Sidebar, FileTable, SearchBar, SearchResults, and related logic removed.
 </script>
 
-<style scoped>
-.app-layout {
+<style> /* Changed to non-scoped to target router-view container */
+/* Global app styles */
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; /* Example modern font stack */
+}
+
+#app {
+  min-height: 100vh;
   display: flex;
+  flex-direction: column;
 }
 
-.main-content {
-  flex-grow: 1; /* Takes remaining space */
-  margin-left: 350px; /* Match updated sidebar width */
-  padding: 0; /* Remove top/bottom padding */
-  /* Removed height: 100vh and overflow-y: auto to allow natural page scroll */
+/* Ensure the div wrapping router-view can grow */
+#app > div {
+  flex-grow: 1;
+  display: flex; /* Make the view container a flex container */
+  flex-direction: column; /* Stack content vertically within the view container */
 }
 
+/* Remove styles that were specific to the old layout */
+/* .app-layout, .main-content, .search-section, .results-section, .file-table-section */
+/* These are now handled within FileManagerView.vue and HomeView.vue */
 </style>

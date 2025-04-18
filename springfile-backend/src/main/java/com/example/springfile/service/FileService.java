@@ -34,9 +34,14 @@ import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.MultipartBodyBuilder;
 import org.springframework.util.StreamUtils;
+import org.springframework.http.HttpHeaders; // Import HttpHeaders
 import org.springframework.web.reactive.function.BodyInserters;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
+import java.util.Collections; // Import Collections
+import com.fasterxml.jackson.databind.JsonNode; // Import JsonNode for handling FastAPI response
+import org.springframework.web.server.ResponseStatusException; // For specific exceptions
+import org.springframework.http.HttpStatus; // For status codes
 
 
 @Service
@@ -53,7 +58,9 @@ public class FileService {
 
     // Constants for FastAPI interaction
     private static final String DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-    private static final String FASTAPI_PREPROCESS_ENDPOINT = "/preprocess/docx/";
+    private static final String FASTAPI_PREPROCESS_ENDPOINT = "/preprocess/docx/"; // Relative path for preprocessing
+    private static final String FASTAPI_EMBEDDING_ENDPOINT = "/embedding/"; // Relative path for embedding
+    private static final String FASTAPI_SEARCH_ENDPOINT = "/search/"; // Relative path for search
 
     @Autowired
     public FileService(FileRepository fileRepository,
@@ -126,7 +133,8 @@ public class FileService {
                 file.getSize(),
                 file.getUploadTimestamp(),
                 file.getCategory() != null ? file.getCategory().getName() : null, // Safely get names
-                file.getSubcategory() != null ? file.getSubcategory().getName() : null
+                file.getSubcategory() != null ? file.getSubcategory().getName() : null,
+                file.isEmbedding() // Add embedding status
         );
     }
 
@@ -382,5 +390,134 @@ public class FileService {
         logger.error("Task {} - Unexpected error during async preprocessing task: {}", taskId, e.getMessage(), e);
         asyncTaskManager.updateTaskStatus(taskId, "FAILED", "Unexpected error: " + e.getMessage(), results);
     }
+    }
+
+    // --- Embedding Logic ---
+
+    // Simple record for the FastAPI embedding request payload
+    private record EmbeddingRequest(String file_path) {}
+
+    /**
+     * Requests embedding generation from the FastAPI service for the given file IDs.
+     * Updates the embedding status of the file in the database upon success.
+     * Note: This implementation processes files sequentially using the injected WebClient.
+     * Consider making it fully asynchronous using reactive chains if performance is critical.
+     *
+     * @param fileIds List of file IDs to request embedding for.
+     */
+    @Transactional
+    public void requestEmbeddings(List<Long> fileIds) {
+        logger.info("Starting embedding request process for file IDs: {}", fileIds);
+
+        for (Long id : fileIds) {
+            try {
+                Optional<File> fileOptional = fileRepository.findById(id);
+                if (fileOptional.isEmpty()) {
+                    logger.warn("Embedding request skipped: File not found for ID {}", id);
+                    continue; // Skip to the next ID
+                }
+
+                File file = fileOptional.get();
+
+                // Removed check for existing embedding status
+
+                String storageIdentifier = file.getStorageIdentifier();
+                if (storageIdentifier == null || storageIdentifier.isBlank()) {
+                     logger.warn("Embedding request skipped: File ID {} has no valid storage identifier.", id);
+                     continue;
+                }
+
+                logger.info("Requesting embedding for file ID {} (Path: {})", id, storageIdentifier);
+
+                EmbeddingRequest payload = new EmbeddingRequest(storageIdentifier);
+
+                // Use the injected fastapiWebClient bean
+                fastapiWebClient.post()
+                        .uri(FASTAPI_EMBEDDING_ENDPOINT) // Use relative path
+                        .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+                        .body(BodyInserters.fromValue(payload))
+                        .retrieve()
+                        // Check for successful response (e.g., 2xx)
+                        .onStatus(httpStatus -> !httpStatus.is2xxSuccessful(),
+                                  clientResponse -> clientResponse.bodyToMono(String.class)
+                                        .flatMap(errorBody -> {
+                                            logger.error("FastAPI embedding error for file ID {}: {} - {}", id, clientResponse.statusCode(), errorBody);
+                                            // Create an error specific to this failure
+                                            return Mono.error(new RuntimeException("FastAPI embedding call failed for file ID " + id + " with status " + clientResponse.statusCode()));
+                                        }))
+                        .bodyToMono(Void.class) // We don't need the response body, just success status
+                        .block(); // Block for simplicity in this loop
+
+                // If block() completes without error, the call was successful
+                logger.info("Successfully received embedding confirmation from FastAPI for file ID {}", id);
+                file.setEmbedding(true);
+                fileRepository.save(file);
+                logger.info("Updated embedding status to true for file ID {}", id);
+
+            } catch (Exception e) {
+                // Log error for this specific file but continue processing others
+                logger.error("Error during embedding request process for file ID {}: {}", id, e.getMessage(), e);
+                // Avoid re-throwing here to allow processing of subsequent IDs
+            }
+        }
+        logger.info("Finished embedding request process for file IDs: {}", fileIds);
+    }
+
+    // --- Search Logic ---
+
+    // Simple record for the FastAPI search request payload
+    private record SearchRequest(String query, int n_results) {}
+
+    /**
+     * Performs a similarity search by calling the FastAPI /search/ endpoint.
+     *
+     * @param query The search query string.
+     * @param nResults The maximum number of results to return.
+     * @return JsonNode representing the search results from FastAPI.
+     * @throws ResponseStatusException if the FastAPI call fails or returns an error status.
+     */
+    public JsonNode searchEmbeddings(String query, int nResults) {
+        logger.info("Initiating search request to FastAPI. Query: '{}', n_results: {}", query, nResults);
+
+        // Ensure nResults has a sensible default if not provided correctly (e.g., <= 0)
+        int effectiveNResults = (nResults > 0) ? nResults : 5; // Default to 5 if invalid
+
+        SearchRequest payload = new SearchRequest(query, effectiveNResults);
+
+        try {
+            // Use the injected fastapiWebClient bean
+            JsonNode response = fastapiWebClient.post()
+                    .uri(FASTAPI_SEARCH_ENDPOINT) // Use relative path for search
+                    .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+                    .body(BodyInserters.fromValue(payload))
+                    .retrieve()
+                    // Handle non-2xx responses from FastAPI
+                    .onStatus(httpStatus -> !httpStatus.is2xxSuccessful(),
+                              clientResponse -> clientResponse.bodyToMono(String.class)
+                                    .flatMap(errorBody -> {
+                                        HttpStatus status = HttpStatus.resolve(clientResponse.statusCode().value());
+                                        if (status == null) {
+                                            status = HttpStatus.INTERNAL_SERVER_ERROR; // Default if unknown
+                                        }
+                                        logger.error("FastAPI search error: {} - {}", clientResponse.statusCode(), errorBody);
+                                        // Create a specific exception with status code and body
+                                        return Mono.error(new ResponseStatusException(status, "FastAPI search failed: " + errorBody));
+                                    }))
+                    .bodyToMono(JsonNode.class) // Expecting a JSON response
+                    .block(); // Block for simplicity
+
+            logger.info("Successfully received search results from FastAPI for query: '{}'", query);
+            return response;
+
+        } catch (ResponseStatusException e) {
+             // Re-throw exceptions that already have status codes
+             logger.error("Search failed due to ResponseStatusException: {}", e.getMessage());
+             throw e;
+        } catch (Exception e) {
+            // Catch other WebClient or unexpected errors
+            logger.error("Error during search request to FastAPI for query '{}': {}", query, e.getMessage(), e);
+            // Throw a generic internal server error
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to communicate with search service: " + e.getMessage(), e);
+        }
     }
 }

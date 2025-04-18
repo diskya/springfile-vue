@@ -1,6 +1,8 @@
 package com.example.springfile.controller;
 
 import com.example.springfile.dto.FileDto;
+import com.example.springfile.dto.SearchQueryDto; // Import DTO for search query
+import com.fasterxml.jackson.databind.JsonNode; // To handle generic JSON response from FastAPI
 import com.example.springfile.model.File;
 import com.example.springfile.service.AsyncTaskManager; // Import AsyncTaskManager
 import com.example.springfile.service.FileService;
@@ -323,6 +325,69 @@ public class FileController {
             logger.error("Failed to initiate async DOCX processing for IDs {}: {}", fileIds, e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(Map.of("message", "Failed to start the processing task: " + e.getMessage()));
+        }
+    }
+
+    // --- New Embedding Endpoint ---
+
+    @PostMapping("/embed")
+    public ResponseEntity<?> triggerEmbedding(@RequestBody List<Long> fileIds) {
+        if (fileIds == null || fileIds.isEmpty()) {
+            logger.warn("Received empty file ID list for embedding request.");
+            return ResponseEntity.badRequest().body(Map.of("message", "File IDs cannot be empty"));
+        }
+        logger.info("Received request to trigger embedding for file IDs: {}", fileIds);
+
+        try {
+            // Call the service method to request embeddings
+            // Note: This service method currently runs synchronously in the loop.
+            // Consider making the service method @Async for long-running tasks.
+            fileService.requestEmbeddings(fileIds);
+
+            logger.info("Embedding request process initiated successfully for file IDs: {}", fileIds);
+            // Return 200 OK indicating the process was initiated
+            // The actual embedding happens in the background (if service is async) or sequentially here.
+            return ResponseEntity.ok().body(Map.of("message", "Embedding process initiated for " + fileIds.size() + " files."));
+
+        } catch (Exception e) {
+            // Handle exceptions during the initiation or execution (if synchronous)
+            logger.error("Failed to process embedding request for IDs {}: {}", fileIds, e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("message", "Failed to process the embedding request: " + e.getMessage()));
+        }
+    }
+
+    // --- New Search Endpoint ---
+
+    @PostMapping("/search")
+    public ResponseEntity<?> searchEmbeddings(@RequestBody SearchQueryDto searchQuery) {
+        if (searchQuery == null || searchQuery.getQuery() == null || searchQuery.getQuery().isBlank()) {
+            logger.warn("Received empty or invalid search query.");
+            return ResponseEntity.badRequest().body(Map.of("message", "Search query cannot be empty"));
+        }
+        // Optional: Validate n_results if you want to enforce limits here too
+        // int nResults = searchQuery.getNResults() > 0 ? searchQuery.getNResults() : 5; // Use default if not provided or invalid
+
+        logger.info("Received search request with query: '{}', n_results: {}", searchQuery.getQuery(), searchQuery.getNResults());
+
+        try {
+            // Call a new service method to perform the search via FastAPI
+            // The service method should return the response body from FastAPI, likely as JsonNode or a specific DTO
+            JsonNode searchResults = fileService.searchEmbeddings(searchQuery.getQuery(), searchQuery.getNResults());
+
+            logger.info("Search completed successfully.");
+            // Return the results obtained from the service (which came from FastAPI)
+            return ResponseEntity.ok(searchResults);
+
+        } catch (ResponseStatusException e) {
+            // Re-throw exceptions that already have status codes (e.g., from service layer)
+             logger.error("Search failed with status {}: {}", e.getStatusCode(), e.getReason(), e);
+             throw e;
+        } catch (Exception e) {
+            // Handle other unexpected exceptions
+            logger.error("An unexpected error occurred during search for query '{}': {}", searchQuery.getQuery(), e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("message", "An unexpected error occurred during the search: " + e.getMessage()));
         }
     }
 }
