@@ -79,10 +79,11 @@ const handleSearch = async (query) => {
   display: flex;
   flex-direction: column;
   align-items: center; /* Center children horizontally */
-  justify-content: center; /* Center children vertically */
-  padding: 40px 20px;
+  justify-content: flex-start; /* Align content towards the top */
+  padding: 60px 20px 40px; /* More padding top */
   box-sizing: border-box;
-  background-color: #f8f9fa; /* Light background */
+  width: 100%; /* Ensure it takes full width */
+  background: var(--color-background); /* Use theme background */
   text-align: center; /* Center text within children by default */
 }
 
@@ -99,18 +100,23 @@ const handleSearch = async (query) => {
 h1 {
   font-size: 2.8rem; /* Slightly larger title */
   font-weight: 300; /* Lighter font weight */
-  color: #343a40; /* Darker heading color */
-  margin-bottom: 40px; /* More space below title */
-  margin-top: 0; /* Remove default top margin */
+  color: var(--color-heading); /* Use theme heading color */
+  margin-bottom: 50px; /* Even more space below title */
+  margin-top: 20px; /* Add some space above title */
 }
 
 .search-section {
   width: 100%;
-  max-width: 650px;
-  margin-bottom: 40px;
+  max-width: 700px; /* Slightly wider search */
+  margin-bottom: 50px;
   /* Ensure SearchBar itself is centered if its internal alignment isn't center */
   display: flex;
   justify-content: center;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1); /* Slightly stronger shadow for visibility */
+  background-color: var(--color-background-soft); /* Use theme soft background */
+  padding: 20px; /* Add padding around the search bar */
+  border-radius: 8px; /* Rounded corners */
+  border: 1px solid var(--color-border); /* Add subtle border */
 }
 
 /* Style the SearchBar component itself if needed via deep selector */
@@ -132,13 +138,14 @@ h1 {
 
 .results-section {
   width: 100%;
-  max-width: 850px;
-  margin-top: 30px;
-  background-color: #fff;
+  max-width: 900px; /* Wider results */
+  margin-top: 40px; /* More space above results */
+  background-color: var(--color-background-soft); /* Use theme soft background */
   border-radius: 8px;
-  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08); /* Adjusted shadow */
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.1); /* Slightly stronger shadow */
   overflow: hidden;
   text-align: left; /* Align text left within results */
+  border: 1px solid var(--color-border); /* Add subtle border */
 }
 
 /* Style the SearchResults component via deep selector */
@@ -167,7 +174,7 @@ h1 {
 
 .welcome-message {
   margin-top: 30px;
-  color: #6c757d;
+  color: var(--color-text); /* Use theme text color */
   font-size: 1.1rem;
 }
 
@@ -175,16 +182,18 @@ h1 {
   display: inline-block;
   margin-top: 20px; /* More space above link */
   padding: 10px 20px; /* Larger padding */
-  background-color: #007bff; /* Use primary color from SearchBar */
-  color: white;
+  background-color: var(--vt-c-indigo); /* Use theme indigo */
+  color: var(--vt-c-white); /* Keep text white */
   text-decoration: none;
   border-radius: 5px; /* Slightly more rounded */
-  transition: background-color 0.2s ease, transform 0.2s ease;
+  transition: background-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
   font-weight: 500;
+  border: 1px solid transparent; /* Add border for consistency */
 }
 
 .nav-link:hover {
-  background-color: #0056b3; /* Darker blue */
+  background-color: #3e526a; /* Slightly lighter indigo for hover */
   transform: translateY(-1px); /* Subtle lift effect */
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2); /* Add shadow on hover */
 }
 </style>

@@ -3,13 +3,13 @@ package com.example.springfile.config;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.web.reactive.function.client.WebClient; // Added import
+import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
-import org.springframework.web.servlet.config.annotation.EnableWebMvc;
+// Removed ViewControllerRegistry, EnableWebMvc, ResourceHandlerRegistry imports
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 @Configuration
-@EnableWebMvc
+// Removed @EnableWebMvc
 public class WebConfig implements WebMvcConfigurer {
 
     // Inject the base URL from application.properties for flexibility
@@ -28,7 +28,11 @@ public class WebConfig implements WebMvcConfigurer {
         registry.addMapping("/api/**") // Apply CORS to all paths under /api
                 .allowedOrigins("http://localhost:5173") // Allow requests from the default Vite dev server origin
                 .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS") // Allowed HTTP methods
-                .allowedHeaders("*") // Allow all headers
-                .allowCredentials(true); // Allow credentials like cookies (if needed)
-    }
-}
+                 .allowedHeaders("*") // Allow all headers
+                  .allowCredentials(true); // Allow credentials like cookies (if needed)
+      }
+  
+      // Removed addResourceHandlers method - rely on Spring Boot defaults
+  
+      // Removed addViewControllers method - rely on Spring Boot defaults for SPA fallback
+  }

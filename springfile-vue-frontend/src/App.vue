@@ -10,27 +10,31 @@
 // Imports for Sidebar, FileTable, SearchBar, SearchResults, and related logic removed.
 </script>
 
-<style> /* Changed to non-scoped to target router-view container */
-/* Global app styles */
+<style> /* Global styles */
 html, body {
   margin: 0;
   padding: 0;
-  height: 100%;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; /* Example modern font stack */
+  height: 100%; /* Ensure html and body take full height */
+  width: 100%; /* Ensure html and body take full width */
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  /* Removed background-color: #f0f2f5; Let base.css handle theme background */
 }
 
 #app {
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
+  /* min-height: 100vh; Removed to prevent unnecessary scrollbars */
+  height: 100%; /* Rely on parent height */
+  width: 100%; /* Ensure app takes full width */
+  display: flex; /* Use flexbox for layout */
+  flex-direction: column; /* Stack children vertically */
 }
 
-/* Ensure the div wrapping router-view can grow */
-#app > div {
-  flex-grow: 1;
-  display: flex; /* Make the view container a flex container */
-  flex-direction: column; /* Stack content vertically within the view container */
-}
+/* Target the direct child of #app which wraps <router-view> */
+/* This assumes <router-view> is wrapped in a div or similar */
+/* #app > * { */ /* Reverted: This caused layout issues in nested flex containers like FileManagerView */
+  /* flex-grow: 1; */
+  /* display: flex; */
+  /* width: 100%; */
+/* } */
 
 /* Remove styles that were specific to the old layout */
 /* .app-layout, .main-content, .search-section, .results-section, .file-table-section */
