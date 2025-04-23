@@ -377,7 +377,11 @@ async def search_embeddings(payload: SearchQueryInput):
 
 if __name__ == "__main__":
     import uvicorn
-    # Run with: uvicorn main:app --reload --port 8001
+    import os
+    # Read port from environment variable PORT, default to 8001 for local dev
+    port = int(os.environ.get("PORT", 8001))
+    # Run with: uvicorn main:app --reload --port $PORT (or default 8001)
     # Includes endpoints: /preprocess/docx/, /embedding/, /search/
-    print("Starting Uvicorn server...")
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    print(f"Starting Uvicorn server on port {port}...")
+    # Use reload=False for production/container environment
+    uvicorn.run(app, host="0.0.0.0", port=port, reload=False)
