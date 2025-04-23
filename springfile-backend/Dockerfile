@@ -1,18 +1,34 @@
-# Use an official OpenJDK 17 runtime as a parent image
+# Stage 1: Build the application using Maven
+FROM maven:3.8-openjdk-17 AS builder
+
+# Set the working directory
+WORKDIR /build
+
+# Copy the Maven project definition
+COPY pom.xml .
+
+# Download dependencies (this layer is cached if pom.xml doesn't change)
+# Using dependency:go-offline is faster for subsequent builds if dependencies haven't changed
+RUN mvn dependency:go-offline -B
+
+# Copy the source code
+COPY src ./src
+
+# Package the application, skipping tests
+# This creates the JAR file in /build/target/
+RUN mvn package -DskipTests -B
+
+# Stage 2: Create the final runtime image
 FROM eclipse-temurin:17-jre-jammy
 
 # Set the working directory inside the container
 WORKDIR /app
 
-# Argument to specify the JAR file path (can be overridden during build)
-ARG JAR_FILE=target/springfile-0.0.1-SNAPSHOT.jar
-
-# Copy the executable JAR file from the build context to the container
-COPY ${JAR_FILE} app.jar
+# Copy the executable JAR file from the builder stage to the final image
+COPY --from=builder /build/target/springfile-0.0.1-SNAPSHOT.jar app.jar
 
 # Make port 8080 available to the world outside this container
 # Cloud Run uses the PORT environment variable, which the app reads from application.properties
-# Exposing 8080 is standard practice, Cloud Run maps $PORT to this.
 EXPOSE 8080
 
 # Run the JAR file when the container launches
