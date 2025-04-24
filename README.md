@@ -1,18 +1,18 @@
 # SpringFile Vue 项目
 
-## feature/cloud-run-config分支适用于在google cloud上部署。
+## feature/cloud-run-config分支适用于在google cloud上部署
 
 ## 项目概述
 
-这是一个全栈文件管理应用程序，具备文件分类和语义搜索功能。用户可以上传文件（PDF、DOCX、PNG 等），对文件进行分类，并根据文件内容进行智能搜索。
+这是一个全栈文件管理web应用练习项目，具备文件分类和语义搜索功能。用户可以上传文件（PDF、DOCX、PNG 等），对文件进行分类，并根据文件内容进行智能搜索。
 项目很大程度上利用了VS Code Cline插件和Gemini 2.5 Pro。
 
 ## 主要功能
 
 *   **文件上传:** 支持上传多种文件类型 (PDF, DOCX, PNG)。
-*   **文件分类:** 将文件组织到不同的分类和子分类中。
+*   **文件管理:** 支持已上传的文件的查看、下载、预处理、向量化（部分格式）。
 *   **语义搜索:** 基于文件内容的含义进行搜索，而不仅仅是关键词匹配。
-*   **文件管理:** 查看、浏览和管理已上传的文件。
+
 
 ## 系统架构
 
@@ -26,14 +26,14 @@
 2.  **`springfile-fastapi` (FastAPI):**
     *   使用python-docx等库预处理上传的文档。（预处理代码尚未更新）
     *   使用Langchain切分文档，随后用Sentence Transformers 生成文本嵌入 (Embeddings)。
-    *   将嵌入存储在 ChromaDB 中，以实现高效的语义搜索。
+    *   将嵌入存储在 ChromaDB 中，以实现高效的语义搜索（向量相似度）。
     *   提供用于索引和搜索的 API 端点。
 3.  **`springfile-vue-frontend` (Vue.js):**
     *   提供用户界面。
     *   使用 Vue 3, Vite, 和 Vue Router 构建。
     *   与 Spring Boot 后端 API 进行交互。
 
-## Google Cloud 部署架构 (可选)
+## Google Cloud 部署架构 (feature/cloud-run-config分支)
 
 本项目可以部署到 Google Cloud Platform，利用以下服务：
 
@@ -50,7 +50,7 @@
 
 *   *文件管理界面*
     ![Cloud Run 服务](img/Screenshot%202025-04-24%20160442.png)
-*   *语义搜索功能（向量相似度）*
+*   *语义搜索功能*
     ![分类](img/Screenshot%202025-04-24%20160305.png)
 
 ## 谷歌云部署截图
