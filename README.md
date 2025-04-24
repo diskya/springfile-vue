@@ -1,8 +1,11 @@
-# SpringFile Vue 项目 (中文版)
+# SpringFile Vue 项目
+
+## feature/cloud-run-config分支适用于在google cloud上部署。
 
 ## 项目概述
 
 这是一个全栈文件管理应用程序，具备文件分类和语义搜索功能。用户可以上传文件（PDF、DOCX、PNG 等），对文件进行分类，并根据文件内容进行智能搜索。
+项目很大程度上利用了VS Code Cline插件和Gemini 2.5 Pro。
 
 ## 主要功能
 
@@ -18,12 +21,11 @@
 1.  **`springfile-backend` (Spring Boot):**
     *   处理核心 API 逻辑（文件的增删改查、分类管理）。
     *   管理文件存储（本地或云存储）。
-    *   与数据库交互（本地 H2 或 Cloud SQL）。
+    *   与数据库交互（本地或 Cloud SQL）。
     *   与 FastAPI 服务通信，用于文件内容索引和搜索。
 2.  **`springfile-fastapi` (FastAPI):**
-    *   提供 AI 驱动的功能。
-    *   从上传的文档（PDF, DOCX）中提取文本内容。
-    *   使用 Sentence Transformers 生成文本嵌入 (Embeddings)。
+    *   使用python-docx等库预处理上传的文档。（预处理代码尚未更新）
+    *   使用Langchain切分文档，随后用Sentence Transformers 生成文本嵌入 (Embeddings)。
     *   将嵌入存储在 ChromaDB 中，以实现高效的语义搜索。
     *   提供用于索引和搜索的 API 端点。
 3.  **`springfile-vue-frontend` (Vue.js):**
@@ -35,7 +37,7 @@
 
 本项目可以部署到 Google Cloud Platform，利用以下服务：
 
-*   **Cloud Run:**
+*   **Cloud Run: (轻量级容器服务)**
     *   部署 `springfile-backend` Spring Boot 应用。
     *   部署 `springfile-fastapi` FastAPI 应用。
     *   提供可扩展、无服务器的容器化应用托管。
@@ -44,19 +46,20 @@
 *   **Cloud Storage:**
     *   用于存储用户上传的文件，提供高可用性和可扩展性的对象存储。
 
-*   *截图: Google Cloud Run 服务*
-    ![Cloud Run 服务](img/Screenshot%202025-04-24%20160442.png)
-
 ## 应用截图
 
-*   *截图 1: 文件管理界面*
-    ![文件管理](img/Screenshot%202025-04-24%20155832.png)
-*   *截图 2: 文件上传界面*
-    ![文件上传](img/Screenshot%202025-04-24%20155905.png)
-*   *截图 3: 搜索功能*
-    ![搜索](img/Screenshot%202025-04-24%20160020.png)
-*   *截图 4: 文件分类侧边栏*
+*   *文件管理界面*
+    ![Cloud Run 服务](img/Screenshot%202025-04-24%20160442.png)
+*   *语义搜索功能（向量相似度）*
     ![分类](img/Screenshot%202025-04-24%20160305.png)
+
+## 谷歌云部署截图
+*   *Cloud Run容器*
+    ![搜索](img/Screenshot%202025-04-24%20160020.png)
+*   *存储桶*
+    ![文件管理](img/Screenshot%202025-04-24%20155832.png)
+*   *Cloud PostgreSQL*
+    ![文件上传](img/Screenshot%202025-04-24%20155905.png)
 
 
 ## 本地安装与运行
@@ -66,6 +69,7 @@
 *   Maven
 *   Node.js & npm
 *   Python 3.x & pip
+*   依赖分别见pom.xml和requirements.txt
 
 **1. 后端 (`springfile-backend`):**
    ```bash
