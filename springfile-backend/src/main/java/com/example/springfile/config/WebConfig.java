@@ -23,16 +23,10 @@ public class WebConfig implements WebMvcConfigurer {
                 .build();
     }
 
-    @Override
-    public void addCorsMappings(CorsRegistry registry) {
-        registry.addMapping("/api/**") // Apply CORS to all paths under /api
-                .allowedOrigins("http://localhost:5173") // Allow requests from the default Vite dev server origin
-                .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS") // Allowed HTTP methods
-                 .allowedHeaders("*") // Allow all headers
-                  .allowCredentials(true); // Allow credentials like cookies (if needed)
-      }
-  
-      // Removed addResourceHandlers method - rely on Spring Boot defaults
+    // Removed addCorsMappings override - not needed for same-origin deployment
+    // and might conflict with Spring Security CORS handling (if enabled later).
+
+    // Removed addResourceHandlers method - rely on Spring Boot defaults
   
       // Removed addViewControllers method - rely on Spring Boot defaults for SPA fallback
   }
