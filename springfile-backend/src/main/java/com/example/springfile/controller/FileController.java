@@ -245,9 +245,11 @@ public class FileController {
             logger.info("Prepared file '{}' (type: {}) for inline viewing.", originalFileName, contentType);
 
             // Key difference: Content-Disposition is "inline"
+            // Encode filename using RFC 5987 format for proper Unicode handling
+            String encodedFileName = URLEncoder.encode(originalFileName, StandardCharsets.UTF_8).replace("+", "%20");
             return ResponseEntity.ok()
                     .contentType(org.springframework.http.MediaType.parseMediaType(contentType))
-                    .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + originalFileName + "\"") // Use simple filename format for inline
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename*=UTF-8''" + encodedFileName)
                     .body(resource);
 
         } catch (RuntimeException e) {
