@@ -67,6 +67,18 @@
 			<artifactId>spring-cloud-gcp-starter-sql-postgresql</artifactId>
 		</dependency>
 
+		<!-- Spring Cloud GCP Starter for Storage -->
+		<dependency>
+			<groupId>com.google.cloud</groupId>
+			<artifactId>spring-cloud-gcp-starter-storage</artifactId>
+		</dependency>
+
+		<!-- Explicitly add core GCS library (version managed by BOM) -->
+		<dependency>
+			<groupId>com.google.cloud</groupId>
+			<artifactId>google-cloud-storage</artifactId>
+		</dependency>
+
 		<dependency>
 			<groupId>org.projectlombok</groupId>
 			<artifactId>lombok</artifactId>
