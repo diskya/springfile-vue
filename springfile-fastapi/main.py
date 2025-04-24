@@ -1,18 +1,20 @@
 import io
 import asyncio # Import asyncio for sleep
-import io
-import asyncio # Import asyncio for sleep
 import os
+import re # For parsing GCS URI
+import tempfile # For handling PDF loading from bytes
 from typing import List # For type hinting
 
 from fastapi import FastAPI, File, UploadFile, HTTPException, status # Added status
 from fastapi.responses import StreamingResponse, JSONResponse # Added JSONResponse
+from google.cloud import storage # Import GCS client
 from pydantic import BaseModel # For request body validation
 from docx import Document
 from docx.shared import Pt
 
 # Langchain specific imports
-from langchain_community.document_loaders import UnstructuredWordDocumentLoader, UnstructuredPDFLoader
+# UnstructuredWordDocumentLoader might not be needed if loading directly from bytes
+from langchain_community.document_loaders import UnstructuredPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import HuggingFaceBgeEmbeddings
 import chromadb # Import ChromaDB client
@@ -21,7 +23,7 @@ app = FastAPI()
 
 # --- Configuration ---
 ALLOWED_EXTENSIONS = {".docx", ".pdf"}
-UPLOADS_DIR = "../springfile-backend/uploads/" # Relative path to Spring Boot uploads
+# UPLOADS_DIR removed - no longer reading from local FS
 MODEL_NAME = "BAAI/bge-small-zh-v1.5"
 MODEL_KWARGS = {'device': 'cpu'} # Use CPU. Change to 'cuda' for GPU if available and configured.
 ENCODE_KWARGS = {'normalize_embeddings': True} # Or False, depending on use case
@@ -41,6 +43,15 @@ try:
 except Exception as e:
     print(f"FATAL: Failed to initialize embedding model: {e}")
     embedding_model = None # Indicate failure
+
+# --- Initialize GCS Client ---
+try:
+    print("Initializing Google Cloud Storage client...")
+    storage_client = storage.Client()
+    print("Google Cloud Storage client initialized successfully.")
+except Exception as e:
+    print(f"FATAL: Failed to initialize Google Cloud Storage client: {e}")
+    storage_client = None
 
 # --- Initialize ChromaDB Client and Collection ---
 try:
@@ -66,8 +77,9 @@ text_splitter = RecursiveCharacterTextSplitter(
 )
 
 # --- Pydantic Models for Input ---
-class FilePathInput(BaseModel):
-    file_path: str # e.g., "some_uuid.docx" or "some_uuid.pdf"
+# Changed model to accept GCS URI
+class GcsUriInput(BaseModel):
+    gcs_uri: str # e.g., "gs://your-bucket-name/your-object-name.docx"
 
 class SearchQueryInput(BaseModel):
     query: str # The text query for similarity search
@@ -126,85 +138,112 @@ async def preprocess_docx(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=f"Could not process file: {e}")
 
 @app.post("/embedding/")
-async def embedding(payload: FilePathInput):
+async def embedding(payload: GcsUriInput): # Changed input model
     """
-    Accepts a relative file path (within the Spring Boot uploads dir),
-    loads the corresponding DOCX or PDF file, splits text,
+    Accepts a GCS URI (e.g., gs://bucket/object.docx),
+    downloads the corresponding DOCX or PDF file from GCS, splits text,
     generates embeddings using the configured BGE model,
-    stores them in ChromaDB, overwriting existing entries for the same file,
+    stores them in ChromaDB, overwriting existing entries for the same GCS URI,
     and returns a success message.
     """
     if embedding_model is None:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Embedding model is not available.")
     if collection is None:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Vector database (ChromaDB) is not available.")
+    if storage_client is None:
+         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="GCS client is not available.")
 
-    # Removed sleep for production readiness
-    # await asyncio.sleep(3)
+    gcs_uri = payload.gcs_uri
+    print(f"Received request to embed file from GCS URI: {gcs_uri}")
 
-    relative_path = payload.file_path
-    print(f"Received request to embed file: {relative_path}")
-
-    # --- File Path Construction and Validation ---
-    full_path = os.path.abspath(os.path.join(UPLOADS_DIR, relative_path))
-    print(f"Constructed full path: {full_path}")
-
-    # Security check: Ensure the path stays within the intended uploads directory
-    if not full_path.startswith(os.path.abspath(UPLOADS_DIR)):
-        print(f"Security Alert: Attempt to access path outside uploads directory: {relative_path}")
+    # --- GCS URI Parsing and Validation ---
+    match = re.match(r"gs://([^/]+)/(.+)", gcs_uri)
+    if not match:
+        print(f"Invalid GCS URI format: {gcs_uri}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid file path specified."
+            detail="Invalid GCS URI format. Expected gs://bucket-name/object-name"
         )
 
-    if not os.path.exists(full_path):
-        print(f"File not found at path: {full_path}")
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"File not found at specified path: {relative_path}"
-        )
+    bucket_name = match.group(1)
+    object_name = match.group(2)
+    print(f"Parsed GCS URI: Bucket='{bucket_name}', Object='{object_name}'")
 
-    _, file_extension = os.path.splitext(relative_path)
+    # Determine file extension from object name
+    _, file_extension = os.path.splitext(object_name)
     file_extension = file_extension.lower()
 
     if file_extension not in ALLOWED_EXTENSIONS:
-        print(f"Invalid file type for embedding: {file_extension}")
+        print(f"Invalid file type for embedding based on GCS object name: {file_extension}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid file type. Allowed types: {', '.join(ALLOWED_EXTENSIONS)}"
+            detail=f"Invalid file type based on GCS object name. Allowed types: {', '.join(ALLOWED_EXTENSIONS)}"
         )
 
     try:
-        # --- Document Loading & Text Extraction ---
+        # --- Download File Content from GCS ---
+        print(f"Downloading content from gs://{bucket_name}/{object_name}...")
+        try:
+            bucket = storage_client.get_bucket(bucket_name)
+            blob = bucket.blob(object_name)
+            if not blob.exists():
+                 print(f"File not found in GCS: gs://{bucket_name}/{object_name}")
+                 raise HTTPException(
+                     status_code=status.HTTP_404_NOT_FOUND,
+                     detail=f"File not found in GCS at specified URI: {gcs_uri}"
+                 )
+            file_content_bytes = blob.download_as_bytes()
+            print(f"Successfully downloaded {len(file_content_bytes)} bytes from GCS.")
+        except Exception as e:
+            print(f"Error downloading file from GCS: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to download file from GCS: {e}"
+            )
+
+        # --- Document Loading & Text Extraction (from downloaded bytes) ---
         all_text = ""
         print(f"Processing file extension: {file_extension}")
         if file_extension == ".docx":
-            print(f"Loading content using python-docx from {full_path}")
+            print(f"Loading content using python-docx from downloaded bytes...")
             try:
-                document = Document(full_path)
+                document = Document(io.BytesIO(file_content_bytes)) # Load from BytesIO
                 all_text = "\n\n".join([para.text for para in document.paragraphs])
-                print(f"Successfully extracted text from DOCX (length: {len(all_text)}).")
+                print(f"Successfully extracted text from DOCX bytes (length: {len(all_text)}).")
             except Exception as e:
-                print(f"Error processing DOCX file content with python-docx: {e}")
+                print(f"Error processing DOCX file content from bytes: {e}")
                 raise HTTPException(
                     status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail=f"Error processing DOCX file content: {e}"
+                    detail=f"Error processing DOCX file content from bytes: {e}"
                 )
         elif file_extension == ".pdf":
-            loader = UnstructuredPDFLoader(full_path)
-            print(f"Loading content using {type(loader).__name__} from {full_path}")
+             # UnstructuredPDFLoader needs a file path. Save bytes to a temporary file.
+            print(f"Loading content using UnstructuredPDFLoader via temporary file...")
             try:
-                # Note: Still using loader.load() here for PDF. If PDFs also hang,
-                # this might need asyncio.to_thread or a different PDF library.
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_pdf:
+                    temp_pdf.write(file_content_bytes)
+                    temp_pdf_path = temp_pdf.name
+                    print(f"Saved PDF bytes to temporary file: {temp_pdf_path}")
+
+                loader = UnstructuredPDFLoader(temp_pdf_path)
                 documents = loader.load()
                 all_text = "\n\n".join([doc.page_content for doc in documents])
-                print(f"Successfully loaded {len(documents)} PDF document parts (total text length: {len(all_text)}).")
+                print(f"Successfully loaded {len(documents)} PDF document parts via temp file (total text length: {len(all_text)}).")
+
             except Exception as e:
-                print(f"Error processing file content with Langchain PDF loader: {e}")
+                print(f"Error processing PDF file content via temporary file: {e}")
                 raise HTTPException(
                     status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail=f"Error processing PDF file content: {e}"
+                    detail=f"Error processing PDF file content via temporary file: {e}"
                 )
+            finally:
+                # Clean up the temporary file
+                if 'temp_pdf_path' in locals() and os.path.exists(temp_pdf_path):
+                    try:
+                        os.remove(temp_pdf_path)
+                        print(f"Cleaned up temporary file: {temp_pdf_path}")
+                    except Exception as cleanup_e:
+                        print(f"Warning: Failed to clean up temporary file {temp_pdf_path}: {cleanup_e}")
         else:
              # Should not happen due to earlier check
              print(f"Internal error: File type processing failed for extension {file_extension}")
@@ -213,7 +252,8 @@ async def embedding(payload: FilePathInput):
         # --- Text Splitting ---
         if not all_text.strip():
              print("Warning: Loaded document content is empty or whitespace only.")
-             return JSONResponse(content={"filename": relative_path, "embeddings": []})
+             # Use gcs_uri in response
+             return JSONResponse(content={"gcs_uri": gcs_uri, "embeddings": []})
 
         print(f"Splitting text (total length: {len(all_text)})...")
         chunks = text_splitter.split_text(all_text)
@@ -221,7 +261,8 @@ async def embedding(payload: FilePathInput):
 
         if not chunks:
              print("Warning: Text splitting resulted in zero chunks.")
-             return JSONResponse(content={"filename": relative_path, "embeddings": []})
+             # Use gcs_uri in response
+             return JSONResponse(content={"gcs_uri": gcs_uri, "embeddings": []})
 
         # --- Embedding Generation ---
         print(f"Generating embeddings for {len(chunks)} chunks using {MODEL_NAME}...")
@@ -237,22 +278,22 @@ async def embedding(payload: FilePathInput):
 
         # --- Store Embeddings in ChromaDB ---
         if embeddings:
-            # Create unique IDs for each chunk based on filename and index
-            ids = [f"{relative_path}_{i}" for i in range(len(chunks))]
-            # Create metadata (optional, but useful)
-            metadatas = [{"source": relative_path, "chunk_index": i} for i in range(len(chunks))]
+            # Create unique IDs for each chunk based on GCS URI and index
+            ids = [f"{gcs_uri}_{i}" for i in range(len(chunks))]
+            # Create metadata (optional, but useful) - store GCS URI as source
+            metadatas = [{"source": gcs_uri, "chunk_index": i} for i in range(len(chunks))]
 
             try:
-                # 1. Delete existing embeddings for this file
-                print(f"Deleting existing embeddings for file: {relative_path}...")
-                # Query for existing IDs associated with this file
-                existing_docs = collection.get(where={"source": relative_path}, include=[]) # Only need IDs
+                # 1. Delete existing embeddings for this GCS URI
+                print(f"Deleting existing embeddings for GCS URI: {gcs_uri}...")
+                # Query for existing IDs associated with this GCS URI
+                existing_docs = collection.get(where={"source": gcs_uri}, include=[]) # Only need IDs
                 if existing_docs and existing_docs['ids']:
                     print(f"Found {len(existing_docs['ids'])} existing embeddings to delete.")
                     collection.delete(ids=existing_docs['ids'])
                     print("Existing embeddings deleted.")
                 else:
-                    print("No existing embeddings found for this file.")
+                    print("No existing embeddings found for this GCS URI.")
 
                 # 2. Add new embeddings
                 print(f"Adding {len(chunks)} new embeddings to ChromaDB collection '{COLLECTION_NAME}'...")
@@ -275,12 +316,12 @@ async def embedding(payload: FilePathInput):
 
 
         # --- Response ---
-        # Return success message instead of embeddings
+        # Return success message using GCS URI
         return JSONResponse(
             status_code=status.HTTP_200_OK,
             content={
-                "message": f"Successfully processed and stored embeddings for file: {relative_path}",
-                "filename": relative_path,
+                "message": f"Successfully processed and stored embeddings for GCS URI: {gcs_uri}",
+                "gcs_uri": gcs_uri,
                 "chunks_processed": len(chunks),
                 "embeddings_stored": len(embeddings) if embeddings else 0
             }

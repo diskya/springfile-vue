@@ -11,3 +11,4 @@ sentence-transformers
 torch
 pdfminer.six
 chromadb # Added for vector storage
+google-cloud-storage # Added for reading files from GCS
