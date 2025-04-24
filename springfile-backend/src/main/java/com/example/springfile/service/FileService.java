@@ -8,6 +8,7 @@ import com.example.springfile.repository.CategoryRepository;
 import com.example.springfile.repository.FileRepository;
 import com.example.springfile.repository.SubcategoryRepository;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value; // Import @Value
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -55,6 +56,7 @@ public class FileService {
     private final FileStorageService fileStorageService;
     private final WebClient fastapiWebClient;
     private final AsyncTaskManager asyncTaskManager; // Added AsyncTaskManager
+    private final String gcsBucketName; // Added GCS bucket name
 
     // Constants for FastAPI interaction
     private static final String DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
@@ -68,13 +70,15 @@ public class FileService {
                        SubcategoryRepository subcategoryRepository,
                        FileStorageService fileStorageService,
                        WebClient fastapiWebClient,
-                       AsyncTaskManager asyncTaskManager) { // Added AsyncTaskManager
+                       AsyncTaskManager asyncTaskManager, // Added AsyncTaskManager
+                       @Value("${gcs.bucket.name}") String gcsBucketName) { // Inject bucket name
         this.fileRepository = fileRepository;
         this.categoryRepository = categoryRepository;
         this.subcategoryRepository = subcategoryRepository;
         this.fileStorageService = fileStorageService;
         this.fastapiWebClient = fastapiWebClient;
         this.asyncTaskManager = asyncTaskManager; // Initialize AsyncTaskManager
+        this.gcsBucketName = gcsBucketName; // Initialize bucket name
     }
 
     @Transactional
@@ -394,8 +398,8 @@ public class FileService {
 
     // --- Embedding Logic ---
 
-    // Simple record for the FastAPI embedding request payload
-    private record EmbeddingRequest(String file_path) {}
+    // Simple record for the FastAPI embedding request payload (now expects GCS URI)
+    private record EmbeddingRequest(String gcs_uri) {}
 
     /**
      * Requests embedding generation from the FastAPI service for the given file IDs.
@@ -424,14 +428,17 @@ public class FileService {
                 String storageIdentifier = file.getStorageIdentifier();
                 if (storageIdentifier == null || storageIdentifier.isBlank()) {
                      logger.warn("Embedding request skipped: File ID {} has no valid storage identifier.", id);
-                     continue;
-                }
+                      continue;
+                 }
 
-                logger.info("Requesting embedding for file ID {} (Path: {})", id, storageIdentifier);
+                 // Construct the GCS URI
+                 String gcsUri = String.format("gs://%s/%s", gcsBucketName, storageIdentifier);
+                 logger.info("Requesting embedding for file ID {} (GCS URI: {})", id, gcsUri);
 
-                EmbeddingRequest payload = new EmbeddingRequest(storageIdentifier);
+                 // Update payload to send GCS URI
+                 EmbeddingRequest payload = new EmbeddingRequest(gcsUri);
 
-                // Use the injected fastapiWebClient bean
+                 // Use the injected fastapiWebClient bean
                 fastapiWebClient.post()
                         .uri(FASTAPI_EMBEDDING_ENDPOINT) // Use relative path
                         .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
